@@ -124,15 +124,37 @@
     dz.addEventListener('dragleave', function () { depth = Math.max(0, depth - 1); if (!depth) dz.classList.remove('dragover'); });
     dz.addEventListener('dragover', function (e) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; });
     dz.addEventListener('drop', function (e) {
-      e.preventDefault(); depth = 0; dz.classList.remove('dragover');
+      e.preventDefault(); e.stopPropagation(); depth = 0; dz.classList.remove('dragover'); document.body.classList.remove('dragging-file');
       var files = e.dataTransfer && e.dataTransfer.files;
       if (!files || !files.length) { fail('No file was received. Please drop an image file.'); return; }
       if (files.length > 1) U.toast('Only one image can be analysed at a time – using “' + files[0].name + '”.', 'warn');
       loadFile(files[0]);
     });
     // a file dropped outside the drop-zone must not navigate the browser away from the app
+    var winDepth = 0;
+    function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1; }
+    window.addEventListener('dragenter', function (e) { if (hasFiles(e)) { winDepth++; document.body.classList.add('dragging-file'); } });
+    window.addEventListener('dragleave', function () { winDepth = Math.max(0, winDepth - 1); if (!winDepth) document.body.classList.remove('dragging-file'); });
     window.addEventListener('dragover', function (e) { e.preventDefault(); });
-    window.addEventListener('drop', function (e) { e.preventDefault(); });
+    window.addEventListener('drop', function (e) {
+      e.preventDefault(); winDepth = 0; document.body.classList.remove('dragging-file');
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) { WS.App.navigate('analyse'); loadFile(files[0]); }
+    });
+    // paste an image from the clipboard (screenshots, copied images)
+    document.addEventListener('paste', function (e) {
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file' && /^image\//.test(items[i].type)) {
+          var f = items[i].getAsFile();
+          if (f) {
+            var ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+            var named = new File([f], f.name && f.name !== 'image.png' ? f.name : 'pasted-image.' + ext, { type: f.type });
+            e.preventDefault(); WS.App.navigate('analyse'); loadFile(named); return;
+          }
+        }
+      }
+    });
 
     $('#setRes').addEventListener('change', setAnalysisSizeText);
     renderSamples();

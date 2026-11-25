@@ -260,3 +260,34 @@
 .about-hero h2 { font-size: clamp(20px, 2.6vw, 28px); margin: 6px 0 10px; max-width: 30ch; }
 .notice { border-left: 4px solid var(--warn); }
 .notice h3 { color: var(--warn); }
+
+/* ---------------------------------------------------------------- UX additions */
+.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.preset { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 9px; padding: 7px 4px; font-size: 12.5px; font-weight: 600; color: var(--muted); transition: all .18s; }
+.preset:hover { border-color: var(--primary); color: var(--primary); }
+.preset.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+
+.progress-steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.progress-steps li { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.progress-steps li.done .icon { color: var(--primary); width: 16px; height: 16px; }
+.progress-steps li.now { color: var(--text); font-weight: 600; }
+.progress-steps .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--primary); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.live-chip { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border-radius: 20px; padding: 6px 12px; }
+.live-chip::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--primary); border-top-color: transparent; animation: spin .8s linear infinite; }
+
+.verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; padding: 16px 20px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 6px; box-shadow: var(--shadow-sm); }
+.verdict.v-high { border-left-color: var(--c-waste); } .verdict.v-medium { border-left-color: #fb8c00; } .verdict.v-low { border-left-color: var(--c-water); } .verdict.v-none { border-left-color: var(--primary); }
+.verdict-main { flex: 1; min-width: 240px; }
+.verdict-main h3 { font-size: 18px; margin-bottom: 4px; }
+.verdict-main p { margin: 0; color: var(--muted); font-size: 14px; }
+.verdict-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.verdict-big { text-align: center; padding: 0 6px; }
+.verdict-big b { display: block; font-size: 30px; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.verdict-big span { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+
+#regionsTable tbody tr.selected { background: color-mix(in srgb, var(--c-waste) 12%, transparent); box-shadow: inset 3px 0 0 var(--c-waste); }
+#regionsTable tbody tr[data-region]:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.viewer-scroll.over-region { cursor: pointer; }
+body.dragging-file::after { content: "Drop the image anywhere to analyse it"; position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; font-size: 22px; font-weight: 700; color: #fff; background: rgba(14, 46, 34, .86); border: 4px dashed var(--green-400); margin: 12px; border-radius: 18px; pointer-events: none; }

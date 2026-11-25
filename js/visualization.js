@@ -8,6 +8,7 @@
   var WS = window.WS = window.WS || {};
   var U = WS.U, $ = U.$;
 
+  var HINT = 'Hover over the image to inspect a pixel. Keys: 1–5 views · + / − zoom · 0 fit · F full screen.';
   var MAX_DISPLAY = 1600;           // longest side of the display canvas
   var els = {};
   var S = {                         // viewer state
@@ -28,7 +29,9 @@
         iw = waste.getContext('2d').createImageData(w, h), ih = heat.getContext('2d').createImageData(w, h);
     var i, p, c, col;
     for (i = 0, p = 0; i < n; i++, p += 4) {
-      c = res.labels[i]; col = CI[c].color;
+      c = res.labels[i];
+      if (c > 4) continue;                       // excluded border / margin: leave transparent
+      col = CI[c].color;
       ic.data[p] = col[0]; ic.data[p + 1] = col[1]; ic.data[p + 2] = col[2]; ic.data[p + 3] = 255;
       if (c === 0) { iw.data[p] = 255; iw.data[p + 1] = 23; iw.data[p + 2] = 38; iw.data[p + 3] = 255; }
       else { io.data[p] = col[0]; io.data[p + 1] = col[1]; io.data[p + 2] = col[2]; io.data[p + 3] = 255; }
@@ -48,17 +51,21 @@
   }
 
   /* ---------------------------------------------------------------- drawing */
-  function drawRegions(ctx, sx, sy, scale) {
+  function drawRegions(ctx, sx, sy, scale, hot, onlyHot) {
     var regs = S.analysis.result.regions;
     ctx.save();
     ctx.lineWidth = Math.max(1.5, 2 * scale); ctx.strokeStyle = '#ff1744';
     ctx.font = '700 ' + Math.round(12 * Math.max(1, scale)) + 'px "Segoe UI", Arial, sans-serif'; ctx.textBaseline = 'middle';
     regs.forEach(function (r) {
+      if (onlyHot && r.id !== hot) return;
+      var isHot = r.id === hot;
+      ctx.strokeStyle = isHot ? '#ffeb3b' : '#ff1744';
+      ctx.lineWidth = Math.max(1.5, (isHot ? 4 : 2) * scale);
       var x = (r.x0 - 1) * sx, y = (r.y0 - 1) * sy, w = (r.x1 - r.x0 + 3) * sx, h = (r.y1 - r.y0 + 3) * sy;
       ctx.strokeRect(x, y, w, h);
       var label = 'R' + r.id, pad = 4 * scale, tw = ctx.measureText(label).width + pad * 2, th = 18 * Math.max(1, scale);
       var ty = y - th < 0 ? y + h : y - th;
-      ctx.fillStyle = '#ff1744'; ctx.fillRect(x, ty, tw, th);
+      ctx.fillStyle = isHot ? '#f9a825' : '#ff1744'; ctx.fillRect(x, ty, tw, th);
       ctx.fillStyle = '#fff'; ctx.fillText(label, x + pad, ty + th / 2 + 1);
     });
     ctx.restore();
@@ -85,10 +92,11 @@
     if (o.classes) { ctx.globalAlpha = op * 0.5; ctx.drawImage(L.other, 0, 0, dw, dh); }
     ctx.globalAlpha = op; ctx.drawImage(L.waste, 0, 0, dw, dh);
     ctx.globalAlpha = 1;
-    if (o.labels) drawRegions(ctx, dw / S.aw, dh / S.ah, Math.max(1, dw / 900));
+    if (o.labels) drawRegions(ctx, dw / S.aw, dh / S.ah, Math.max(1, dw / 900), o.hot, false);
+    else if (o.hot) drawRegions(ctx, dw / S.aw, dh / S.ah, Math.max(1, dw / 900), o.hot, true);
   }
 
-  function opts() { var s = settings(); return { dw: S.dw, dh: S.dh, opacity: s.overlayOpacity / 100, classes: !!s.showClasses, labels: !!s.showLabels }; }
+  function opts() { var s = settings(); return { dw: S.dw, dh: S.dh, opacity: s.overlayOpacity / 100, classes: !!s.showClasses, labels: !!s.showLabels, hot: S.hot || 0 }; }
 
   /* ---------------------------------------------------------------- viewer plumbing */
   function render() {
@@ -152,6 +160,9 @@
 
   function setAnalysis(analysis) {
     var res = analysis.result, src = analysis.source;
+    var keep = !!S.analysis && S.analysis.originalWidth === analysis.originalWidth && S.analysis.originalHeight === analysis.originalHeight && !S.fit;
+    var kz = S.zoom, ksl = els.scroll.scrollLeft, kst = els.scroll.scrollTop;
+    S.hot = 0;
     S.analysis = analysis; S.aw = res.width; S.ah = res.height;
     var sc = Math.min(1, MAX_DISPLAY / Math.max(analysis.originalWidth, analysis.originalHeight));
     S.dw = Math.max(1, Math.round(analysis.originalWidth * sc)); S.dh = Math.max(1, Math.round(analysis.originalHeight * sc));
@@ -163,7 +174,9 @@
     els.cvA.width = els.cvB.width = S.dw; els.cvA.height = els.cvB.height = S.dh;
     setView(S.view || 'overlay');
     // size the viewer once the page is visible
-    requestAnimationFrame(function () { resetZoom(); });
+    requestAnimationFrame(function () {
+      if (keep) { S.zoom = kz; S.fit = false; applyZoom(); els.scroll.scrollLeft = ksl; els.scroll.scrollTop = kst; } else resetZoom();
+    });
   }
 
   function clear() {
@@ -258,11 +271,25 @@
       if (pan && S.view !== 'compare') { els.scroll.scrollLeft = pan.sl - (e.clientX - pan.x); els.scroll.scrollTop = pan.st - (e.clientY - pan.y); }
       else if (pan && S.view === 'compare') { var rect = els.stage.getBoundingClientRect(); S.compare = U.clamp((e.clientX - rect.left) / rect.width, 0, 1); applyCompare(); }
       readout(e);
+      if (!pan && S.analysis && S.view !== 'compare') {
+        var hid = regionAt(e);
+        els.scroll.classList.toggle('over-region', !!hid);
+        if (hid !== (S.hot || 0)) { S.hot = hid; scheduleRender(); WS.bus.emit('region:hover', hid); }
+      }
     });
-    function endPan(e) { pan = null; els.scroll.classList.remove('panning'); try { els.scroll.releasePointerCapture(e.pointerId); } catch (err) {} }
+    function regionAt(e) {
+      var p = S.analysis && pointerToAnalysis(e);
+      return p ? S.analysis.result.regionMap[p.y * S.aw + p.x] : 0;
+    }
+    function endPan(e) {
+      if (pan && e.type === 'pointerup' && S.view !== 'compare' && Math.hypot(e.clientX - pan.x, e.clientY - pan.y) < 4) {
+        var rid = regionAt(e); if (rid) WS.bus.emit('region:select', rid);
+      }
+      pan = null; els.scroll.classList.remove('panning'); try { els.scroll.releasePointerCapture(e.pointerId); } catch (err) {} }
     els.scroll.addEventListener('pointerup', endPan);
     els.scroll.addEventListener('pointercancel', endPan);
-    els.scroll.addEventListener('pointerleave', function () { els.readout.textContent = 'Hover over the image to inspect a pixel.'; });
+    els.scroll.addEventListener('pointerleave', function () { els.readout.textContent = HINT; if (S.hot) { S.hot = 0; scheduleRender(); WS.bus.emit('region:hover', 0); } });
+    WS.bus.on('region:select', function (id) { S.hot = id; scheduleRender(); });
 
     // compare handle drag
     var drag = false;
@@ -285,7 +312,8 @@
     var res = S.analysis.result, i = p.y * S.aw + p.x, CI = WS.Classifier.CLASS_INFO;
     var rid = res.regionMap[i];
     var sc = S.analysis.prep.scale || 1;
-    els.readout.textContent = 'x ' + Math.round(p.x / sc) + ', y ' + Math.round(p.y / sc) + ' · ' + CI[res.labels[i]].name + (rid ? ' (region R' + rid + ')' : '') + ' · waste score ' + (res.score8[i] / 255).toFixed(2);
+    var cname = res.labels[i] > 4 ? 'Excluded border / margin' : CI[res.labels[i]].name;
+    els.readout.textContent = 'x ' + Math.round(p.x / sc) + ', y ' + Math.round(p.y / sc) + ' · ' + cname + (rid ? ' (region R' + rid + ')' : '') + ' · waste score ' + (res.score8[i] / 255).toFixed(2);
   }
 
   function toggleFullscreen() {
@@ -302,12 +330,23 @@
       tagL: $('#tagL'), tagR: $('#tagR'), zoomLabel: $('#zoomLabel'), legend: $('#legend'), readout: $('#pixelReadout')
     };
     bindInteraction();
+    document.addEventListener('keydown', function (e) {
+      if (!S.analysis || document.body.getAttribute('data-page') !== 'results') return;
+      if (/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+      var m = { '1': 'original', '2': 'processed', '3': 'overlay', '4': 'heatmap', '5': 'compare' };
+      if (m[e.key]) setView(m[e.key]);
+      else if (e.key === '+' || e.key === '=') setZoom(S.zoom * 1.25);
+      else if (e.key === '-') setZoom(S.zoom / 1.25);
+      else if (e.key === '0') resetZoom();
+      else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+    });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { var c = $('#viewerCard'); if (c.classList.contains('is-fs')) fallbackFs(c); } });
   }
 
   WS.Viewer = {
     init: init, setAnalysis: setAnalysis, clear: clear, setView: setView, focusRegion: focusRegion,
     exportCanvas: exportCanvas, exportAnnotated: exportAnnotated, thumb: thumb, resetZoom: resetZoom,
-    hasAnalysis: function () { return !!S.analysis; }
+    hasAnalysis: function () { return !!S.analysis; },
+    setHot: function (id) { S.hot = id; scheduleRender(); }
   };
 })();

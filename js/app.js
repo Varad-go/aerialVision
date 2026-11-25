@@ -13,7 +13,7 @@
 
   var SETTINGS_KEY = 'wastescan.settings.v1';
   var DEFAULTS = {
-    sensitivity: 50, colourVariation: 22, minRegionPct: 0.15, resolution: 'medium', gsd: 0,
+    sensitivity: 50, colourVariation: 22, minRegionPct: 0.15, resolution: 'medium', gsd: 0, colourCorrection: false, liveUpdate: false,
     overlayOpacity: 60, showClasses: true, showLabels: true, theme: null
   };
   var PAGES = ['dashboard', 'analyse', 'results', 'report', 'history', 'how', 'method', 'about'];
@@ -32,7 +32,7 @@
   /** The subset of settings that the analysis engine understands. */
   function engineSettings() {
     var s = state.settings;
-    return { sensitivity: +s.sensitivity, colourVariation: +s.colourVariation, minRegionPct: +s.minRegionPct, resolution: s.resolution, gsd: +s.gsd || 0 };
+    return { sensitivity: +s.sensitivity, colourVariation: +s.colourVariation, minRegionPct: +s.minRegionPct, resolution: s.resolution, gsd: +s.gsd || 0, colourCorrection: !!s.colourCorrection };
   }
 
   WS.legendHTML = function (opts) {
@@ -99,9 +99,27 @@
   }
 
   /* ================================================================ SETTINGS PANEL */
-  var ENGINE_KEYS = ['sensitivity', 'colourVariation', 'minRegionPct', 'resolution', 'gsd'];
+  var ENGINE_KEYS = ['sensitivity', 'colourVariation', 'minRegionPct', 'resolution', 'gsd', 'colourCorrection'];
+  var PRESETS = {
+    conservative: { sensitivity: 30, colourVariation: 32, minRegionPct: 0.30 },
+    balanced: { sensitivity: 50, colourVariation: 22, minRegionPct: 0.15 },
+    sensitive: { sensitivity: 72, colourVariation: 16, minRegionPct: 0.08 }
+  };
+  function highlightPreset() {
+    var s = state.settings;
+    $$('#presets .preset').forEach(function (b) {
+      var p = PRESETS[b.getAttribute('data-preset')];
+      var on = +s.sensitivity === p.sensitivity && +s.colourVariation === p.colourVariation && Math.abs(+s.minRegionPct - p.minRegionPct) < 0.0051;
+      b.classList.toggle('active', on); b.setAttribute('aria-pressed', on);
+    });
+  }
+  /** Live update: re-run the analysis shortly after a setting changes. */
+  var scheduleLive = U.debounce(function () {
+    if (state.settings.liveUpdate && state.loaded && state.analysis) runAnalysis({ live: true });
+  }, 450);
+
   function markDirty() {
-    if (!state.analysis) return;
+    if (!state.analysis || state.settings.liveUpdate) return;
     state.settingsDirty = true;
     $('#settingsNote').innerHTML = '<strong>Settings changed.</strong> Press <em>Reanalyse Image</em> to apply them to the current image.';
   }
@@ -117,6 +135,9 @@
     $('#setOpacity').value = s.overlayOpacity; $('#setOpacityVal').textContent = s.overlayOpacity + '%';
     $('#setRes').value = s.resolution;
     $('#setGsd').value = s.gsd > 0 ? s.gsd : '';
+    $('#setCorrect').checked = !!s.colourCorrection;
+    $('#liveUpdate').checked = !!s.liveUpdate;
+    highlightPreset();
     var vo = $('#viewerOpacity'); if (vo) { vo.value = s.overlayOpacity; $('#viewerOpacityVal').textContent = s.overlayOpacity + '%'; }
     var tc = $('#toggleClasses'); if (tc) tc.checked = !!s.showClasses;
     var tl = $('#toggleLabels'); if (tl) tl.checked = !!s.showLabels;
@@ -127,7 +148,7 @@
       $(id).addEventListener('input', function (e) {
         state.settings[key] = parse(e.target.value);
         saveSettings(); syncSettingsUI();
-        if (ENGINE_KEYS.indexOf(key) !== -1) markDirty();
+        if (ENGINE_KEYS.indexOf(key) !== -1) { markDirty(); scheduleLive(); }
         if (after) after();
       });
     }
@@ -137,6 +158,7 @@
     bind('#setOpacity', 'overlayOpacity', Number, function () { WS.bus.emit('overlay:change'); });
     bind('#setRes', 'resolution', String);
     bind('#setGsd', 'gsd', function (v) { var n = parseFloat(v); return n > 0 ? n : 0; });
+    $('#setCorrect').addEventListener('change', function (e) { state.settings.colourCorrection = e.target.checked; saveSettings(); markDirty(); scheduleLive(); });
     var vo = $('#viewerOpacity');
     if (vo) vo.addEventListener('input', function (e) { state.settings.overlayOpacity = Number(e.target.value); saveSettings(); syncSettingsUI(); WS.bus.emit('overlay:change'); });
     var tc = $('#toggleClasses'); if (tc) tc.addEventListener('change', function (e) { state.settings.showClasses = e.target.checked; saveSettings(); WS.bus.emit('overlay:change'); });
@@ -144,10 +166,25 @@
 
     $('#resetSettingsBtn').addEventListener('click', function () {
       ENGINE_KEYS.concat(['overlayOpacity']).forEach(function (k) { state.settings[k] = DEFAULTS[k]; });
-      saveSettings(); syncSettingsUI(); markDirty(); WS.bus.emit('overlay:change');
+      saveSettings(); syncSettingsUI(); markDirty(); scheduleLive(); WS.bus.emit('overlay:change');
       U.toast('Detection settings restored to defaults.');
     });
     $('#reanalyseBtn').addEventListener('click', function () { runAnalysis(); });
+    $('#presets').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-preset]'); if (!b) return;
+      Object.assign(state.settings, PRESETS[b.getAttribute('data-preset')]);
+      saveSettings(); syncSettingsUI(); markDirty(); scheduleLive();
+      U.toast(b.textContent + ' preset applied' + (state.analysis && !state.settings.liveUpdate ? ' – press Reanalyse Image.' : '.'));
+    });
+    $('#liveUpdate').addEventListener('change', function (e) {
+      state.settings.liveUpdate = e.target.checked; saveSettings();
+      if (e.target.checked && state.settingsDirty) scheduleLive();
+    });
+    $('#saveHistoryBtn').addEventListener('click', function () {
+      var a = state.analysis;
+      if (!a || !WS.History) return;
+      a.live = false; WS.History.add(a); $('#saveHistoryBtn').hidden = true; U.toast('Saved to history.');
+    });
   }
 
   /* ================================================================ DASHBOARD */
@@ -236,17 +273,27 @@
   }
 
   /* ================================================================ ANALYSIS ORCHESTRATION */
+  var progressLog = [];
+  function renderSteps(allDone) {
+    $('#progressSteps').innerHTML = progressLog.map(function (l, i) {
+      var finished = allDone || i < progressLog.length - 1;
+      return '<li class="' + (finished ? 'done' : 'now') + '">' + (finished ? U.icon('check') : '<i class="spin"></i>') + '<span>' + U.escapeHtml(l) + '</span></li>';
+    }).join('');
+  }
   function setProgress(f, label) {
     var pct = Math.round(U.clamp(f, 0, 1) * 100);
     $('#progressBar').style.width = pct + '%';
     $('#progressPct').textContent = pct + '%';
     $('#progressLabel').textContent = label || '';
     $('#progressTrack').setAttribute('aria-valuenow', pct);
+    if (label && progressLog[progressLog.length - 1] !== label) { progressLog.push(label); renderSteps(false); }
+    if (f >= 1) renderSteps(true);
   }
-  function setBusy(b) {
+  function setBusy(b, live) {
     state.busy = b;
     ['analyseBtn', 'reanalyseBtn'].forEach(function (id) { var el = document.getElementById(id); if (el) el.disabled = b || !state.loaded; });
-    $('#progressCard').hidden = !b;
+    $('#progressCard').hidden = !b || !!live;
+    var chip = $('#liveChip'); if (chip) chip.hidden = !(b && live);
     document.body.classList.toggle('is-busy', b);
   }
   function showUploadError(msg) {
@@ -255,17 +302,19 @@
     e.hidden = false; e.innerHTML = U.icon('alert') + '<span>' + U.escapeHtml(msg) + '</span>';
   }
 
-  function runAnalysis() {
-    if (state.busy) return;
+  function runAnalysis(opts) {
+    var live = !!(opts && opts.live === true);
+    if (state.busy) { if (live) state.pendingLive = true; return; }
     if (!state.loaded) { U.toast('Please upload an image first.', 'warn'); navigate('analyse'); return; }
-    if (currentPage !== 'analyse') navigate('analyse');
+    if (!live && currentPage !== 'analyse') navigate('analyse');
     showUploadError('');
-    setBusy(true); setProgress(0, 'Preparing…');
+    progressLog = []; renderSteps(false);
+    setBusy(true, live); setProgress(0, 'Preparing…');
     var snapshot = engineSettings();
     var loaded = state.loaded;
     WS.ImageProcessor.analyse(loaded, snapshot, setProgress).then(function (out) {
       var analysis = {
-        id: U.uid(), date: new Date().toISOString(),
+        id: U.uid(), date: new Date().toISOString(), live: live,
         filename: loaded.name, fileSize: loaded.size, fileType: loaded.type,
         originalWidth: loaded.width, originalHeight: loaded.height,
         settings: snapshot, result: out.result, prep: { width: out.prep.width, height: out.prep.height, scale: out.prep.scale },
@@ -274,15 +323,19 @@
       analysis.summary = WS.Results ? WS.Results.buildSummary(analysis) : '';
       state.analysis = analysis;
       clearDirty();
-      setBusy(false);
+      setBusy(false, live);
       WS.bus.emit('analysis:done', analysis);
       analysis.source = null;   // the viewer has copied the pixels it needs; do not keep the image alive
-      var n = out.result.regions.length;
-      U.toast('Analysis complete: ' + n + ' candidate region' + (n === 1 ? '' : 's') + ' (' + out.result.wastePct.toFixed(2) + '% of the image).');
-      document.title = '✓ Analysis complete – WasteScan';
-      navigate('results');
+      if (!live) {
+        var n = out.result.regions.length;
+        U.toast('Analysis complete: ' + n + ' candidate region' + (n === 1 ? '' : 's') + ' (' + out.result.wastePct.toFixed(2) + '% of the image).');
+        document.title = '✓ Analysis complete – WasteScan';
+        navigate('results');
+      }
+      if (state.pendingLive) { state.pendingLive = false; runAnalysis({ live: true }); }
     }).catch(function (err) {
-      setBusy(false);
+      setBusy(false, live);
+      state.pendingLive = false;
       if (err && err.message === 'cancelled') { U.toast('Analysis cancelled.', 'warn'); return; }
       console.error('[WasteScan] analysis failed', err);
       var msg = 'The analysis failed: ' + (err && err.message ? err.message : 'unknown error') + '. Try a smaller image or a lower analysis resolution.';

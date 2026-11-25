@@ -51,6 +51,24 @@
       '</span><strong class="stat-value">' + value + '</strong><small class="stat-sub">' + sub + '</small></div></article>';
   }
 
+  function verdictHTML(a) {
+    var r = a.result, pc = priorityCounts(r.regions), n = r.regions.length;
+    var level = pc.High ? 'high' : (pc.Medium ? 'medium' : (n ? 'low' : 'none'));
+    var title, text;
+    if (!n) {
+      title = 'No candidate waste areas found';
+      text = 'With the current settings nothing in this image looks like waste. That is not proof that none is present – try the Sensitive preset or a higher resolution.';
+    } else {
+      title = n + ' candidate area' + (n === 1 ? '' : 's') + ' to verify' + (pc.High ? ' – ' + pc.High + ' high priority' : '');
+      var big = r.regions[0];
+      text = 'Largest: R' + big.id + ' (' + big.pct.toFixed(2) + '% of the image, score ' + big.score + '). Input suitability: ' + r.suitabilityLabel + '. These are heuristic candidates – check them on site.';
+    }
+    var chips = n ? '<div class="verdict-chips"><span class="pill pill-high">' + pc.High + ' High</span><span class="pill pill-medium">' + pc.Medium + ' Medium</span><span class="pill pill-low">' + pc.Low + ' Low</span></div>' : '';
+    return '<div class="verdict v-' + level + '"><div class="verdict-big"><b>' + r.wastePct.toFixed(2) + '%</b><span>flagged</span></div>' +
+      '<div class="verdict-main"><h3>' + U.escapeHtml(title) + '</h3><p>' + U.escapeHtml(text) + '</p>' + chips + '</div>' +
+      (n ? '<button class="btn btn-outline" data-zoom-region="1">' + U.icon('zoom-in') + 'Zoom to largest</button>' : '') + '</div>';
+  }
+
   function render(a) {
     var r = a.result, CI = WS.Classifier.CLASS_INFO, n = r.pixels;
     $('#resultsEmpty').hidden = true; $('#resultsBody').hidden = false;
@@ -63,9 +81,12 @@
       return '<div class="alert ' + (w.level === 'warn' ? 'alert-warn' : 'alert-info') + '">' + U.icon(w.level === 'warn' ? 'alert' : 'info') + '<span>' + U.escapeHtml(w.message) + '</span></div>';
     }).join('');
 
+    $('#resVerdict').innerHTML = verdictHTML(a);
+    $('#saveHistoryBtn').hidden = !a.live;
+
     // statistic cards
     var cards = [
-      statCard('image', 'c-green', 'Total pixels analysed', U.fmtInt(n), r.width + ' × ' + r.height + ' px'),
+      statCard('image', 'c-green', 'Total pixels analysed', U.fmtInt(n), r.width + ' × ' + r.height + ' px' + (r.excludedPixels ? ' · ' + U.fmtInt(r.excludedPixels) + ' px border excluded' : '')),
       statCard('pin', 'c-red', 'Suspected waste pixels', U.fmtInt(r.counts[0]), r.percentages[0].toFixed(2) + '% of image', 'is-waste'),
       statCard('chart', 'c-red', 'Suspected waste coverage', r.wastePct.toFixed(2) + '%', 'heuristic estimate', 'is-waste'),
       statCard('layers', 'c-amber', 'Connected suspected regions', U.fmtInt(r.regions.length), r.discardedRegions + ' smaller / thread-like candidate(s) discarded'),
@@ -122,8 +143,25 @@
     WS.bus.on('analysis:cleared', showEmpty);
     $('#regionsBody').addEventListener('click', function (e) {
       var tr = e.target.closest('[data-region]');
-      if (tr) WS.Viewer.focusRegion(+tr.getAttribute('data-region'));
+      if (tr) { var id = +tr.getAttribute('data-region'); WS.bus.emit('region:select', id); WS.Viewer.focusRegion(id); }
     });
+    $('#resVerdict').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-zoom-region]');
+      if (b) { WS.bus.emit('region:select', 1); WS.Viewer.focusRegion(1); }
+    });
+    // keep the table row and the outline in the image in sync
+    WS.bus.on('region:select', function (id) {
+      var rows = document.querySelectorAll('#regionsBody tr[data-region]');
+      Array.prototype.forEach.call(rows, function (tr) { tr.classList.toggle('selected', +tr.getAttribute('data-region') === id); });
+      var row = document.querySelector('#regionsBody tr[data-region="' + id + '"]');
+      if (row && !document.getElementById('viewerCard').matches(':hover')) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    WS.bus.on('region:hover', function (id) {
+      var rows = document.querySelectorAll('#regionsBody tr[data-region]');
+      Array.prototype.forEach.call(rows, function (tr) { tr.classList.toggle('selected', id && +tr.getAttribute('data-region') === id); });
+    });
+    $('#quickCsv').addEventListener('click', function () { if (WS.Report) WS.Report.downloadCSV(); });
+    $('#quickPng').addEventListener('click', function () { if (WS.Report) WS.Report.downloadImage(); });
     showEmpty();
   }
 
