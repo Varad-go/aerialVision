@@ -276,6 +276,7 @@
       clearDirty();
       setBusy(false);
       WS.bus.emit('analysis:done', analysis);
+      analysis.source = null;   // the viewer has copied the pixels it needs; do not keep the image alive
       var n = out.result.regions.length;
       U.toast('Analysis complete: ' + n + ' candidate region' + (n === 1 ? '' : 's') + ' (' + out.result.wastePct.toFixed(2) + '% of the image).');
       document.title = '✓ Analysis complete – WasteScan';
