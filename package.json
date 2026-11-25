@@ -1,0 +1,12 @@
+{
+  "name": "wastescan",
+  "version": "1.0.0",
+  "description": "WasteScan – offline, in-browser heuristic detection of potential illegal waste dumping in aerial images",
+  "private": true,
+  "scripts": {
+    "test": "node tests/engine.test.js",
+    "start": "python -m http.server 8000",
+    "samples": "node tools/generate-sample.js"
+  },
+  "license": "UNLICENSED"
+}

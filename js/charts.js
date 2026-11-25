@@ -39,9 +39,10 @@
     if (v <= 0) return 1;
     var p = Math.pow(10, Math.floor(Math.log10(v)));
     var n = v / p;
-    var m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+    var m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 4 ? 4 : n <= 5 ? 5 : 10;
     return m * p;
   }
+  function tickCount(top) { var n = top / Math.pow(10, Math.floor(Math.log10(top))); return Math.abs(n - 5) < 1e-9 ? 5 : 4; }
   function polar(cx, cy, r, a) { return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }
   function arcPath(cx, cy, r0, r1, a0, a1) {
     var large = a1 - a0 > Math.PI ? 1 : 0;
@@ -110,7 +111,7 @@
     var W = 420, H = 240, ml = 46, mr = 10, mt = 18, mb = 38;
     var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'chart-svg', role: 'img', 'aria-label': opts.aria || 'Bar chart' });
     var top = opts.max || niceMax(maxV || 1), fmt = opts.fmt || function (v) { return String(Math.round(v * 100) / 100); };
-    var ticks = opts.ticks || 4, iw = W - ml - mr, ih = H - mt - mb, i;
+    var ticks = opts.ticks || tickCount(top), iw = W - ml - mr, ih = H - mt - mb, i;
     for (i = 0; i <= ticks; i++) {
       var y = mt + ih - ih * i / ticks, v = top * i / ticks;
       svg.appendChild(svgEl('line', { x1: ml, x2: W - mr, y1: y, y2: y, class: 'grid' }));
@@ -146,17 +147,17 @@
     var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'chart-svg', role: 'img', 'aria-label': opts.aria || 'Line chart' });
     var color = opts.color || '#1f7a4d', fmt = opts.fmt || function (v) { return v.toFixed(1); };
     var maxV = Math.max.apply(null, points.map(function (p) { return p.value; }));
-    var top = niceMax(maxV || 1), iw = W - ml - mr, ih = H - mt - mb, i;
+    var top = niceMax(maxV || 1), tk = tickCount(top), iw = W - ml - mr, ih = H - mt - mb, i;
     var gid = 'lg' + Math.random().toString(36).slice(2, 7);
     var defs = svgEl('defs', {});
     var lg = svgEl('linearGradient', { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 });
     lg.appendChild(svgEl('stop', { offset: '0', 'stop-color': color, 'stop-opacity': '.32' }));
     lg.appendChild(svgEl('stop', { offset: '1', 'stop-color': color, 'stop-opacity': '0' }));
     defs.appendChild(lg); svg.appendChild(defs);
-    for (i = 0; i <= 4; i++) {
-      var y = mt + ih - ih * i / 4;
+    for (i = 0; i <= tk; i++) {
+      var y = mt + ih - ih * i / tk;
       svg.appendChild(svgEl('line', { x1: ml, x2: W - mr, y1: y, y2: y, class: 'grid' }));
-      var tl = svgEl('text', { x: ml - 7, y: y + 3.5, 'text-anchor': 'end', class: 'axis-label' }); tl.textContent = fmt(top * i / 4);
+      var tl = svgEl('text', { x: ml - 7, y: y + 3.5, 'text-anchor': 'end', class: 'axis-label' }); tl.textContent = fmt(top * i / tk);
       svg.appendChild(tl);
     }
     var n = points.length;
