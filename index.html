@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WasteScan – Illegal Waste Dumping Detection</title>
+  <meta name="description" content="WasteScan identifies potential illegal waste dumping locations from aerial and satellite images using local, in-browser RGB image analysis.">
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/responsive.css">
+  <script>
+    /* apply the saved theme before first paint to avoid a flash */
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem('wastescan.settings.v1') || '{}');
+        var t = s.theme || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body data-page="dashboard">
+
+<!-- ============ inline SVG icon sprite (no external assets) ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1.1-1.5 2.2M12 17h.01"/></symbol>
+  <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 006.2 21h11.6a2 2 0 001.7-2.5L14 9V3"/><path d="M7.5 15h9"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M11 8v6M8 11h6"/></symbol>
+  <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8 11h6"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-compare" viewBox="0 0 24 24"><path d="M12 3v18M8 7H5a1 1 0 00-1 1v8a1 1 0 001 1h3M16 7h3a1 1 0 011 1v8a1 1 0 01-1 1h-3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 9"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18h.01"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5-12-7.5z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h8M18 6h2M4 12h2M12 12h8M4 18h10M20 18h0"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6M7 17H5a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2h-2"/><rect x="7" y="14" width="10" height="7"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s7-6 7-11a7 7 0 10-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/></symbol>
+  <symbol id="i-area" viewBox="0 0 24 24"><path d="M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3V7z"/><path d="M9 4v13M15 7v13"/></symbol>
+</svg>
+
+<div class="app">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+    <a class="brand" href="#/dashboard" aria-label="WasteScan home">
+      <img src="assets/logo.svg" alt="" width="40" height="40">
+      <span class="brand-text"><strong>WasteScan</strong><small>Detect. Analyse. Protect.</small></span>
+    </a>
+    <nav class="nav" id="nav">
+      <div class="nav-label">Workspace</div>
+      <a class="nav-item" href="#/dashboard" data-nav="dashboard"><svg class="icon"><use href="#i-dashboard"/></svg><span>Dashboard</span></a>
+      <a class="nav-item" href="#/analyse" data-nav="analyse"><svg class="icon"><use href="#i-upload"/></svg><span>Upload &amp; Analyse</span></a>
+      <a class="nav-item" href="#/results" data-nav="results"><svg class="icon"><use href="#i-layers"/></svg><span>Results</span><i class="nav-dot" id="navResultsDot" hidden></i></a>
+      <a class="nav-item" href="#/report" data-nav="report"><svg class="icon"><use href="#i-file"/></svg><span>Report</span></a>
+      <a class="nav-item" href="#/history" data-nav="history"><svg class="icon"><use href="#i-clock"/></svg><span>History</span><b class="nav-count" id="navHistoryCount" hidden>0</b></a>
+      <div class="nav-label">Project</div>
+      <a class="nav-item" href="#/how" data-nav="how"><svg class="icon"><use href="#i-help"/></svg><span>How It Works</span></a>
+      <a class="nav-item" href="#/method" data-nav="method"><svg class="icon"><use href="#i-flask"/></svg><span>Methodology</span></a>
+      <a class="nav-item" href="#/about" data-nav="about"><svg class="icon"><use href="#i-info"/></svg><span>About Project</span></a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="privacy-chip"><svg class="icon"><use href="#i-shield"/></svg><span>100% local. Images never leave this browser.</span></div>
+    </div>
+  </aside>
+  <div class="backdrop" id="sidebarBackdrop"></div>
+
+  <!-- ===================== MAIN ===================== -->
+  <div class="main-wrap">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open navigation"><svg class="icon"><use href="#i-menu"/></svg></button>
+      <div class="topbar-title">
+        <h1 id="pageTitle">Dashboard</h1>
+        <p id="pageSub">Environmental monitoring overview</p>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-primary" id="quickUploadBtn"><svg class="icon"><use href="#i-upload"/></svg><span>Quick Upload</span></button>
+        <button class="icon-btn" id="themeBtn" aria-label="Toggle dark / light mode" title="Toggle dark / light mode"><svg class="icon icon-moon"><use href="#i-moon"/></svg><svg class="icon icon-sun"><use href="#i-sun"/></svg></button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <main class="content" id="content">
+
+        <!-- ================= DASHBOARD ================= -->
+        <section class="page" id="page-dashboard" data-title="Dashboard" data-sub="Environmental monitoring overview">
+          <div class="hero">
+            <div class="hero-text">
+              <span class="eyebrow">Illegal waste dumping identification</span>
+              <h2>Detect. Analyse. Protect.</h2>
+              <p>Upload an aerial or satellite image and WasteScan will examine its pixels locally in your browser to highlight areas that look like potential illegal waste dumping.</p>
+              <div class="hero-actions">
+                <button class="btn btn-light" data-goto="analyse"><svg class="icon"><use href="#i-upload"/></svg>Upload an image</button>
+                <button class="btn btn-ghost-light" id="heroSampleBtn"><svg class="icon"><use href="#i-play"/></svg>Try a demo image</button>
+              </div>
+            </div>
+            <svg class="hero-art" viewBox="0 0 260 180" aria-hidden="true">
+              <rect x="6" y="6" width="248" height="168" rx="14" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.25)"/>
+              <g stroke="rgba(255,255,255,.18)"><path d="M6 60h248M6 112h248M88 6v168M170 6v168"/></g>
+              <path d="M30 30h58v50H30z" fill="#2e7d32" opacity=".7"/><path d="M100 124h60v42h-60z" fill="#c9b35a" opacity=".6"/>
+              <path d="M178 20h64v48h-64z" fill="#1e88e5" opacity=".55"/>
+              <path d="M108 54l22-10 26 12 6 22-16 20-30 4-16-18z" fill="#ff5a4f" opacity=".92"/>
+              <g fill="none" stroke="#9af0bd" stroke-width="3" stroke-linecap="round"><path d="M96 36V28h8M168 28h8v8M96 104v8h8M168 112h8v-8"/></g>
+            </svg>
+          </div>
+
+          <div class="source-bar">
+            <div class="seg" id="dashSourceTabs" role="tablist" aria-label="Statistics source">
+              <button class="seg-btn" data-source="actual" role="tab">Your analyses</button>
+              <button class="seg-btn" data-source="sample" role="tab">Sample statistics</button>
+            </div>
+            <div class="source-note" id="dashBanner"></div>
+          </div>
+
+          <div class="stat-grid" id="dashStats">
+            <article class="stat-card">
+              <div class="stat-icon c-green"><svg class="icon"><use href="#i-image"/></svg></div>
+              <div class="stat-body"><span class="stat-label">Images analysed</span><strong class="stat-value" id="statImages">0</strong><small class="stat-sub" id="statImagesSub"></small></div>
+              <span class="badge-src" data-src-badge></span>
+            </article>
+            <article class="stat-card">
+              <div class="stat-icon c-red"><svg class="icon"><use href="#i-pin"/></svg></div>
+              <div class="stat-body"><span class="stat-label">Suspected dumping sites</span><strong class="stat-value" id="statSites">0</strong><small class="stat-sub" id="statSitesSub"></small></div>
+              <span class="badge-src" data-src-badge></span>
+            </article>
+            <article class="stat-card">
+              <div class="stat-icon c-amber"><svg class="icon"><use href="#i-chart"/></svg></div>
+              <div class="stat-body"><span class="stat-label">Avg. suspected waste coverage</span><strong class="stat-value" id="statCoverage">0%</strong><small class="stat-sub" id="statCoverageSub"></small></div>
+              <span class="badge-src" data-src-badge></span>
+            </article>
+            <article class="stat-card">
+              <div class="stat-icon c-blue"><svg class="icon"><use href="#i-area"/></svg></div>
+              <div class="stat-body"><span class="stat-label">Total analysed area</span><strong class="stat-value" id="statArea">0</strong><small class="stat-sub" id="statAreaSub"></small></div>
+              <span class="badge-src" data-src-badge></span>
+            </article>
+          </div>
+
+          <div class="grid-3">
+            <article class="card span-2">
+              <header class="card-head"><h3>Suspected waste coverage per analysis</h3><span class="badge-src" data-src-badge></span></header>
+              <div class="chart-box" id="chartTrend"></div>
+            </article>
+            <article class="card">
+              <header class="card-head"><h3>Average land-cover mix</h3><span class="badge-src" data-src-badge></span></header>
+              <div class="chart-box" id="chartDonutDash"></div>
+            </article>
+          </div>
+
+          <div class="grid-3">
+            <article class="card">
+              <header class="card-head"><h3>Candidate regions by priority</h3><span class="badge-src" data-src-badge></span></header>
+              <div class="chart-box" id="chartBarDash"></div>
+            </article>
+            <article class="card span-2">
+              <header class="card-head"><h3>Recent analysis history</h3><a class="link" href="#/history">View all</a></header>
+              <div class="table-wrap">
+                <table class="table" id="dashRecent">
+                  <thead><tr><th>Image</th><th>Date</th><th class="num">Waste cover</th><th class="num">Regions</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+
+          <p class="fineprint"><svg class="icon"><use href="#i-info"/></svg>Sample statistics are generated locally for illustration only and do not come from real images. "Your analyses" are read from this browser's local storage. WasteScan produces heuristic image-processing estimates that must be verified by a person.</p>
+        </section>
+
+        <!-- ================= UPLOAD & ANALYSE ================= -->
+        <section class="page" id="page-analyse" data-title="Upload &amp; Analyse" data-sub="Step 1 – choose an image, Step 2 – run the analysis">
+          <article class="card upload-card">
+            <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload an aerial or satellite image">
+              <div class="dz-empty" id="uploadEmpty">
+                <svg class="dz-art" viewBox="0 0 160 110" aria-hidden="true">
+                  <rect x="10" y="10" width="140" height="90" rx="12" class="dz-frame"/>
+                  <path d="M10 76l36-30 28 22 20-14 56 36" class="dz-hill"/>
+                  <circle cx="112" cy="36" r="9" class="dz-sun"/>
+                  <path d="M80 20v-0" />
+                  <g class="dz-arrow"><circle cx="80" cy="55" r="19"/><path d="M80 65V46M72 53l8-8 8 8"/></g>
+                </svg>
+                <h2>Upload Your Aerial or Satellite Image</h2>
+                <p>Upload an aerial photograph or satellite image to identify potential illegal waste dumping locations.</p>
+                <div class="dz-actions">
+                  <button class="btn btn-primary" id="browseBtn" type="button"><svg class="icon"><use href="#i-image"/></svg>Browse files</button>
+                  <span class="dz-or">or drag and drop here</span>
+                </div>
+                <small class="dz-types">JPG · JPEG · PNG · WEBP &nbsp;•&nbsp; processed locally, never uploaded</small>
+              </div>
+
+              <div class="dz-preview" id="uploadPreview" hidden>
+                <div class="preview-thumb"><img id="previewImg" alt="Uploaded image preview"></div>
+                <div class="preview-meta">
+                  <h3 id="fileName">—</h3>
+                  <dl class="meta-list">
+                    <div><dt>Resolution</dt><dd id="fileRes">—</dd></div>
+                    <div><dt>File size</dt><dd id="fileSize">—</dd></div>
+                    <div><dt>Format</dt><dd id="fileType">—</dd></div>
+                    <div><dt>Analysis size</dt><dd id="fileAnalysisRes">—</dd></div>
+                  </dl>
+                  <div class="preview-actions">
+                    <button class="btn btn-outline" id="replaceBtn" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Replace image</button>
+                    <button class="btn btn-outline danger" id="removeBtn" type="button"><svg class="icon"><use href="#i-trash"/></svg>Remove</button>
+                  </div>
+                </div>
+              </div>
+              <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden>
+            </div>
+
+            <div class="alert alert-error" id="uploadError" role="alert" hidden></div>
+
+            <div class="analyse-bar">
+              <button class="btn btn-primary btn-lg" id="analyseBtn" disabled><svg class="icon"><use href="#i-play"/></svg>Analyse Image</button>
+              <span class="analyse-hint" id="analyseHint">Upload an image to enable analysis.</span>
+            </div>
+
+            <div class="progress-card" id="progressCard" hidden>
+              <div class="progress-top"><strong id="progressLabel">Starting…</strong><span id="progressPct">0%</span></div>
+              <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressTrack"><div class="progress-bar" id="progressBar"></div></div>
+              <div class="progress-foot"><small>Running in a background worker so the page stays responsive.</small><button class="btn btn-text" id="cancelBtn" type="button">Cancel</button></div>
+            </div>
+          </article>
+
+          <article class="card">
+            <header class="card-head"><h3>No image at hand? Try a demonstration image</h3></header>
+            <p class="muted small-gap">These are <strong>synthetic, computer-generated</strong> scenes bundled with the project (not real satellite imagery). They let you try the full workflow offline.</p>
+            <div class="sample-grid" id="sampleList"></div>
+          </article>
+
+          <article class="card tips-card">
+            <header class="card-head"><h3>Tips for better results</h3></header>
+            <ul class="tips">
+              <li>Use <strong>top-down (nadir) RGB</strong> imagery with natural colours. Oblique photos and infrared false-colour images are not suitable.</li>
+              <li>Higher-resolution imagery (≈ 0.1–1 m per pixel) shows the mixed colours and texture that dumping sites produce.</li>
+              <li>Dense villages, quarries and rocky ground also look "busy" and can produce false candidates. Always verify on site.</li>
+              <li>Adjust the <strong>Detection Settings</strong> panel and press <em>Reanalyse Image</em> to compare different sensitivities.</li>
+            </ul>
+          </article>
+        </section>
+
+        <!-- ================= RESULTS ================= -->
+        <section class="page" id="page-results" data-title="Analysis Results" data-sub="Detection visualisation and land-cover statistics">
+          <div class="empty-state card" id="resultsEmpty">
+            <svg viewBox="0 0 160 110" aria-hidden="true" class="empty-art"><rect x="14" y="12" width="132" height="86" rx="10" class="dz-frame"/><path d="M30 78l24-22 20 14 18-18 32 26" class="dz-hill"/><circle cx="108" cy="38" r="8" class="dz-sun"/></svg>
+            <h2>No analysis yet</h2>
+            <p>Upload an aerial or satellite image and click <strong>Analyse Image</strong> to see detections, statistics and charts here.</p>
+            <button class="btn btn-primary" data-goto="analyse"><svg class="icon"><use href="#i-upload"/></svg>Go to Upload &amp; Analyse</button>
+          </div>
+
+          <div id="resultsBody" hidden>
+            <div class="results-head">
+              <div>
+                <h2 id="resTitle">—</h2>
+                <p class="muted" id="resMeta">—</p>
+              </div>
+              <div class="results-actions">
+                <button class="btn btn-outline" id="resetAnalysisBtn"><svg class="icon"><use href="#i-refresh"/></svg>Reset analysis</button>
+                <button class="btn btn-primary" data-goto="report"><svg class="icon"><use href="#i-file"/></svg>Open report</button>
+              </div>
+            </div>
+
+            <div id="resWarnings"></div>
+            <div class="alert alert-info"><svg class="icon"><use href="#i-info"/></svg><span><strong>Heuristic estimate.</strong> Highlighted areas come from RGB colour and texture rules, not from a trained or validated model. They are <em>candidate</em> areas that need human verification and are not confirmed illegal dumping.</span></div>
+
+            <article class="card viewer-card" id="viewerCard">
+              <header class="viewer-toolbar">
+                <div class="seg seg-sm" id="viewTabs" role="tablist" aria-label="Image view">
+                  <button class="seg-btn" data-view="original">Original</button>
+                  <button class="seg-btn" data-view="processed">Processed</button>
+                  <button class="seg-btn" data-view="overlay">Detection overlay</button>
+                  <button class="seg-btn" data-view="heatmap">Score heatmap</button>
+                  <button class="seg-btn" data-view="compare"><svg class="icon icon-sm"><use href="#i-compare"/></svg>Compare</button>
+                </div>
+                <div class="viewer-tools">
+                  <button class="icon-btn" id="zoomOut" aria-label="Zoom out" title="Zoom out"><svg class="icon"><use href="#i-zoom-out"/></svg></button>
+                  <span class="zoom-label" id="zoomLabel">100%</span>
+                  <button class="icon-btn" id="zoomIn" aria-label="Zoom in" title="Zoom in"><svg class="icon"><use href="#i-zoom-in"/></svg></button>
+                  <button class="icon-btn" id="zoomReset" aria-label="Reset zoom" title="Reset zoom (fit)"><svg class="icon"><use href="#i-fit"/></svg></button>
+                  <button class="icon-btn" id="fullscreenBtn" aria-label="Full screen" title="Full screen"><svg class="icon"><use href="#i-expand"/></svg></button>
+                </div>
+              </header>
+              <div class="viewer-options">
+                <label class="inline-range">Overlay opacity <input type="range" id="viewerOpacity" min="0" max="100" step="1"><output id="viewerOpacityVal">60%</output></label>
+                <label class="check"><input type="checkbox" id="toggleClasses"> Show other land-cover classes</label>
+                <label class="check"><input type="checkbox" id="toggleLabels"> Show region labels</label>
+              </div>
+              <div class="viewer-scroll" id="viewerScroll">
+                <div class="viewer-stage" id="viewerStage">
+                  <canvas id="cvA"></canvas>
+                  <canvas id="cvB"></canvas>
+                  <div class="compare-handle" id="compareHandle" hidden><span><svg class="icon"><use href="#i-compare"/></svg></span></div>
+                  <div class="compare-tag tag-l" id="tagL" hidden>Original</div>
+                  <div class="compare-tag tag-r" id="tagR" hidden>Detection overlay</div>
+                </div>
+              </div>
+              <footer class="viewer-foot">
+                <div class="legend" id="legend"></div>
+                <div class="readout" id="pixelReadout">Hover over the image to inspect a pixel.</div>
+              </footer>
+            </article>
+
+            <div class="stat-grid stat-grid-5" id="resCards"></div>
+
+            <div class="grid-2">
+              <article class="card"><header class="card-head"><h3>Land-cover distribution</h3></header><div class="chart-box" id="chartDonut"></div></article>
+              <article class="card"><header class="card-head"><h3>Pixels per category</h3></header><div class="chart-box" id="chartBar"></div></article>
+            </div>
+
+            <article class="card">
+              <header class="card-head"><h3>Suspected waste regions</h3><span class="muted small" id="regionsCount"></span></header>
+              <div class="table-wrap">
+                <table class="table" id="regionsTable">
+                  <thead><tr><th>Region ID</th><th>Location (x, y)</th><th class="num">Approx. pixel area</th><th class="num">% of image</th><th class="num">Detection score</th><th>Classification</th></tr></thead>
+                  <tbody id="regionsBody"></tbody>
+                </table>
+              </div>
+              <p class="fineprint"><svg class="icon"><use href="#i-info"/></svg>Priority is derived from a heuristic detection score (High ≥ 70, Medium ≥ 58, otherwise Low) and the region's size. It ranks candidates for review; it does not confirm illegal dumping. <strong>Human verification is required.</strong></p>
+            </article>
+
+            <article class="card">
+              <header class="card-head"><h3>Analysis summary</h3></header>
+              <div class="summary-text" id="resSummary"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ================= REPORT ================= -->
+        <section class="page" id="page-report" data-title="Report" data-sub="Download or print the analysis report">
+          <div class="empty-state card" id="reportEmpty">
+            <svg viewBox="0 0 160 110" aria-hidden="true" class="empty-art"><rect x="44" y="8" width="72" height="94" rx="8" class="dz-frame"/><path d="M58 34h44M58 48h44M58 62h30" class="dz-hill"/><circle cx="104" cy="82" r="8" class="dz-sun"/></svg>
+            <h2>No report available</h2>
+            <p>Run an analysis first. The report is generated entirely in your browser from the current results.</p>
+            <button class="btn btn-primary" data-goto="analyse"><svg class="icon"><use href="#i-upload"/></svg>Go to Upload &amp; Analyse</button>
+          </div>
+          <div id="reportBody" hidden>
+            <div class="report-actions card">
+              <div>
+                <h3>Export</h3>
+                <p class="muted">All files are generated locally in your browser – nothing is sent to a server.</p>
+              </div>
+              <div class="report-buttons">
+                <button class="btn btn-primary" id="btnPdf"><svg class="icon"><use href="#i-file"/></svg>Download PDF Report</button>
+                <button class="btn btn-outline" id="btnCsv"><svg class="icon"><use href="#i-table"/></svg>Download CSV Results</button>
+                <button class="btn btn-outline" id="btnImg"><svg class="icon"><use href="#i-image"/></svg>Download Detection Image</button>
+                <button class="btn btn-outline" id="btnPrint"><svg class="icon"><use href="#i-print"/></svg>Print</button>
+              </div>
+            </div>
+            <div class="report-sheet-wrap"><div class="report-sheet" id="reportPreview"></div></div>
+          </div>
+        </section>
+
+        <!-- ================= HISTORY ================= -->
+        <section class="page" id="page-history" data-title="Analysis History" data-sub="Stored only in this browser (localStorage)">
+          <div class="history-head">
+            <p class="muted">Each completed analysis is saved locally with its statistics and small thumbnails. The full-size image is <strong>not</strong> stored.</p>
+            <button class="btn btn-outline danger" id="clearHistoryBtn"><svg class="icon"><use href="#i-trash"/></svg>Clear all history</button>
+          </div>
+          <div class="empty-state card" id="historyEmpty">
+            <svg viewBox="0 0 160 110" aria-hidden="true" class="empty-art"><circle cx="80" cy="55" r="36" class="dz-frame"/><path d="M80 34v22l14 9" class="dz-hill"/></svg>
+            <h2>No saved analyses</h2>
+            <p>Completed analyses will appear here so you can review them later.</p>
+          </div>
+          <div class="history-grid" id="historyList"></div>
+        </section>
+
+        <!-- ================= HOW IT WORKS ================= -->
+        <section class="page" id="page-how" data-title="How It Works" data-sub="From upload to report in eight steps">
+          <div class="steps">
+            <article class="step"><span class="step-n">1</span><div><h3>Image upload</h3><p>You choose or drop a JPG, PNG or WEBP aerial / satellite image. The file is read by your browser only; nothing is uploaded.</p></div></article>
+            <article class="step"><span class="step-n">2</span><div><h3>Pre-processing</h3><p>The image is decoded, resized to the chosen analysis resolution (aspect ratio preserved) and its RGB values are extracted from an HTML canvas.</p></div></article>
+            <article class="step"><span class="step-n">3</span><div><h3>Land-cover classification</h3><p>Every pixel is assigned to vegetation, built-up, water or barren land using colour-space rules (excess-green index, hue, saturation, brightness and local smoothness).</p></div></article>
+            <article class="step"><span class="step-n">4</span><div><h3>Potential waste identification</h3><p>Local colour variation, texture, bright/dark mixing, colour diversity and edge irregularity are combined into a waste-likelihood score for each pixel.</p></div></article>
+            <article class="step"><span class="step-n">5</span><div><h3>Region grouping</h3><p>Pixels above the sensitivity threshold are cleaned with morphological filters and grouped into connected regions; tiny and thread-like regions are discarded.</p></div></article>
+            <article class="step"><span class="step-n">6</span><div><h3>Detection overlay</h3><p>Suspected waste is painted red on top of the original image; other classes use green, blue, grey and yellow. The opacity is adjustable.</p></div></article>
+            <article class="step"><span class="step-n">7</span><div><h3>Statistical analysis</h3><p>Pixel counts and percentages are computed for the five classes, and every candidate region receives an area, a score and a review priority.</p></div></article>
+            <article class="step"><span class="step-n">8</span><div><h3>Report generation</h3><p>A PDF report, CSV table and detection image are created locally. The analysis is also stored in the browser history.</p></div></article>
+          </div>
+          <article class="card">
+            <header class="card-head"><h3>What the colours mean</h3></header>
+            <div class="legend legend-wide" data-legend-static></div>
+          </article>
+        </section>
+
+        <!-- ================= METHODOLOGY ================= -->
+        <section class="page" id="page-method" data-title="Methodology" data-sub="The image-processing algorithm in detail">
+          <article class="card prose">
+            <h3>1. Approach</h3>
+            <p>WasteScan is a <strong>rule-based (heuristic) image-processing system</strong>. It does not use a neural network, a trained model, a satellite API or any online service. All numbers are computed from the pixels of the image you provide, in JavaScript, on your computer.</p>
+            <h3>2. Pre-processing</h3>
+            <p>The image is drawn onto an HTML canvas at the selected analysis resolution (long side 480 / 800 / 1200 px) with high-quality smoothing and its RGBA buffer is read. Large images are therefore down-sampled before analysis. Processing runs in a Web Worker to keep the interface responsive.</p>
+            <h3>3. Per-pixel features</h3>
+            <ul>
+              <li><strong>Colour spaces</strong> – RGB, HSV and luminance (0.299R + 0.587G + 0.114B).</li>
+              <li><strong>Excess-green index</strong> ExG = (2G − R − B) / (R + G + B) for vegetation.</li>
+              <li><strong>Colour buckets</strong> – each pixel is quantised into one of 8 colour families (dark, bright, grey, red, orange/brown, green, blue, purple).</li>
+            </ul>
+            <h3>4. Neighbourhood (window) features</h3>
+            <p>Using separable box filters over a (2r+1)² window (r grows with image size) the following are computed for every pixel:</p>
+            <ul>
+              <li><strong>RGB colour variation</strong> – √(σR² + σG² + σB²) within the window.</li>
+              <li><strong>Texture</strong> – local standard deviation of luminance.</li>
+              <li><strong>Edge density</strong> – mean Sobel gradient magnitude.</li>
+              <li><strong>Edge irregularity</strong> – edge density multiplied by (1 − orientation coherence). Orientation coherence uses the fourth power of the complex gradient, so straight edges and rectangular building grids score as <em>regular</em> and chaotic debris scores as <em>irregular</em>.</li>
+              <li><strong>Colour diversity</strong> – Shannon entropy of the 8-bucket colour histogram.</li>
+              <li><strong>Bright + dark mixing</strong> – min(share of dark pixels, share of bright pixels).</li>
+              <li><strong>Local contrast</strong> – distance between the local mean colour and the mean of a 3× larger surrounding window (distinct from surrounding vegetation/land).</li>
+              <li><strong>Synthetic colours</strong> – share of strongly saturated blue-to-magenta pixels (tarps, plastics).</li>
+            </ul>
+            <h3>5. Waste-likelihood score</h3>
+            <p>Each cue is normalised to 0–1 and combined with fixed weights (colour variation 0.20, diversity 0.18, irregularity 0.15, contrast 0.15, bright/dark mixing 0.13, texture 0.11, synthetic colour 0.08). The score is reduced where the context is unlikely to be waste: calm water, flat surfaces and homogeneous green canopy. Pixels whose local colour variation is below the <em>colour variation threshold</em> are excluded outright.</p>
+            <h3>6. Region grouping</h3>
+            <p>The sensitivity slider sets the score threshold (threshold = 0.70 − 0.45 × sensitivity/100). The binary mask is cleaned by morphological opening (removes thin lines such as field edges and river banks) and closing (joins nearby fragments). Connected components are then labelled with an 8-neighbour flood fill. Regions smaller than the <em>minimum region size</em>, or long and thin (major/minor axis ratio above 3.5), are discarded.</p>
+            <h3>7. Land-cover classification</h3>
+            <p>Water: smooth, blue/teal dominant (or dark and bluish). Vegetation: positive excess-green with a green hue. Barren land: warm brown/tan tones. Built-up: neutral grey/white and strongly coloured roofs. A 5×5 majority filter removes isolated pixels. Pixels inside accepted regions become <em>Waste Dumping (suspected)</em>.</p>
+            <h3>8. Detection score and priority</h3>
+            <p>A region's score is 100 × (0.7 × mean pixel score + 0.3 × peak pixel score). Scores ≥ 70 are labelled High priority, ≥ 58 Medium and the rest Low. The label ranks candidates for field verification only.</p>
+            <h3>9. Reliability checks</h3>
+            <p>The system warns when an image is tiny, almost grayscale, extremely dark or bright, very blurry, nearly uniform, or when more than 35% of it is flagged – situations where RGB heuristics cannot be trusted.</p>
+            <h3>10. Limitations</h3>
+            <ul>
+              <li>No machine-learning model and no ground-truth validation: accuracy is unknown on real imagery.</li>
+              <li>Dense settlements, quarries, rocky ground, plastic-covered farmland and shadows can be mistaken for waste; clean-looking waste can be missed.</li>
+              <li>Only visible RGB is used – no infrared, thermal or spectral-index data.</li>
+              <li>Region areas are in analysis-resolution pixels; conversion to hectares needs the ground sampling distance you provide.</li>
+            </ul>
+          </article>
+        </section>
+
+        <!-- ================= ABOUT ================= -->
+        <section class="page" id="page-about" data-title="About Project" data-sub="Final-year engineering project">
+          <article class="card about-hero">
+            <span class="eyebrow dark">Project title</span>
+            <h2>Identification of Illegal Waste Dumping Sites Using Remote Sensing and Image Analysis</h2>
+            <p class="muted">Website name: <strong>WasteScan</strong> &nbsp;·&nbsp; Tagline: <em>Detect. Analyse. Protect.</em></p>
+          </article>
+          <div class="grid-2">
+            <article class="card prose"><h3>Problem statement</h3><p>Illegal waste dumping creates environmental pollution, affects public health, and damages natural ecosystems. Traditional manual monitoring is time-consuming and requires significant human effort.</p></article>
+            <article class="card prose"><h3>Proposed solution</h3><p>WasteScan provides a browser-based image analysis platform that examines aerial and satellite images to identify potential waste dumping locations.</p></article>
+          </div>
+          <div class="grid-2">
+            <article class="card prose">
+              <h3>Technology used</h3>
+              <div class="chips">
+                <span class="chip">Remote Sensing</span><span class="chip">Aerial Image Analysis</span><span class="chip">RGB Colour Analysis</span><span class="chip">Digital Image Processing</span>
+                <span class="chip">Pixel Classification</span><span class="chip">Region Detection</span><span class="chip">HTML</span><span class="chip">CSS</span><span class="chip">JavaScript</span><span class="chip">HTML Canvas</span>
+              </div>
+            </article>
+            <article class="card prose">
+              <h3>Study area</h3>
+              <p><svg class="icon inline-icon"><use href="#i-pin"/></svg><strong>Satara–Songav region, Maharashtra, India.</strong></p>
+              <p>The current prototype uses image-based RGB analysis and does not depend on physical sensors.</p>
+            </article>
+          </div>
+          <article class="card prose notice">
+            <h3>Important notes</h3>
+            <ul>
+              <li>WasteScan uses <strong>local image processing and heuristic classification</strong>. It does <strong>not</strong> use a trained deep-learning model, a neural network or a satellite API.</li>
+              <li>Results are <strong>estimates</strong> and are not scientifically validated waste detection. Detected regions are candidates only and need verification by a person.</li>
+              <li>Everything runs offline in your browser. Images are never uploaded, and analysis history is stored only in this browser's localStorage.</li>
+            </ul>
+          </article>
+        </section>
+
+      </main>
+
+      <!-- ===================== INSPECTOR: DETECTION SETTINGS ===================== -->
+      <aside class="inspector" id="inspector" aria-label="Detection settings">
+        <div class="inspector-inner">
+          <header class="inspector-head"><svg class="icon"><use href="#i-sliders"/></svg><h3>Detection settings</h3></header>
+
+          <div class="field">
+            <label for="setSens">Waste detection sensitivity <output id="setSensVal">50</output></label>
+            <input type="range" id="setSens" min="0" max="100" step="1">
+            <small>Higher = lower score threshold = more candidate areas (and more false alarms).</small>
+          </div>
+          <div class="field">
+            <label for="setCV">Colour variation threshold <output id="setCVVal">22</output></label>
+            <input type="range" id="setCV" min="5" max="80" step="1">
+            <small>Minimum local RGB variation (std-dev) needed before a pixel can be a candidate.</small>
+          </div>
+          <div class="field">
+            <label for="setMin">Minimum region size <output id="setMinVal">0.15%</output></label>
+            <input type="range" id="setMin" min="2" max="200" step="1">
+            <small>Candidate regions smaller than this share of the image are ignored.</small>
+          </div>
+          <div class="field">
+            <label for="setOpacity">Overlay transparency <output id="setOpacityVal">60%</output></label>
+            <input type="range" id="setOpacity" min="0" max="100" step="1">
+            <small>Opacity of the colour overlay in the viewer.</small>
+          </div>
+          <div class="field">
+            <label for="setRes">Analysis resolution</label>
+            <select id="setRes">
+              <option value="low">Low – 480 px (fastest)</option>
+              <option value="medium">Medium – 800 px (balanced)</option>
+              <option value="high">High – 1200 px (detailed, slower)</option>
+            </select>
+            <small>Longest side of the image used for analysis. Smaller images are not enlarged.</small>
+          </div>
+          <div class="field">
+            <label for="setGsd">Ground resolution (optional)</label>
+            <div class="input-unit"><input type="number" id="setGsd" min="0" step="0.01" placeholder="e.g. 0.5"><span>m / pixel</span></div>
+            <small>Only used to convert pixel counts into hectares. Leave empty if unknown.</small>
+          </div>
+
+          <div class="inspector-actions">
+            <button class="btn btn-primary btn-block" id="reanalyseBtn" disabled><svg class="icon"><use href="#i-refresh"/></svg>Reanalyse Image</button>
+            <button class="btn btn-outline btn-block" id="resetSettingsBtn"><svg class="icon"><use href="#i-fit"/></svg>Restore default settings</button>
+          </div>
+          <p class="inspector-note" id="settingsNote">Changing a setting does not re-run the analysis automatically. Press <em>Reanalyse Image</em> to apply it.</p>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="site-foot">WasteScan · heuristic RGB image analysis · offline · for demonstration and academic use. Results require human verification.</footer>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <header class="modal-head"><h3 id="modalTitle">Details</h3><button class="icon-btn" data-close-modal aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button></header>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- application scripts (classic scripts so the site also works from file://) -->
+<script src="js/utils.js"></script>
+<script src="js/classifier.js"></script>
+<script src="js/detection.js"></script>
+<script src="js/imageProcessor.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/sampledata.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

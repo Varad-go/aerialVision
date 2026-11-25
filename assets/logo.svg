@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="WasteScan logo">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f8a56"/>
+      <stop offset="1" stop-color="#0b3a2a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#g)"/>
+  <!-- aerial grid -->
+  <g stroke="#ffffff" stroke-opacity=".22" stroke-width="1.2">
+    <path d="M14 22h36M14 32h36M14 42h36M24 12v40M34 12v40M44 12v40"/>
+  </g>
+  <!-- detected patch -->
+  <path d="M27 27l7-3 8 4 2 7-5 7-9 1-5-6z" fill="#ff5a4f" fill-opacity=".9"/>
+  <!-- scan brackets -->
+  <g fill="none" stroke="#9af0bd" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 21v-6a2 2 0 012-2h6M51 21v-6a2 2 0 00-2-2h-6M13 43v6a2 2 0 002 2h6M51 43v6a2 2 0 01-2 2h-6"/>
+  </g>
+</svg>
