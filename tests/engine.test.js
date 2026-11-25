@@ -85,4 +85,47 @@ run('progress callback reaches 100%', function () {
   D.runSync(D.createJob(sc.rgba, sc.width, sc.height, {}), function (f) { last = f; });
   assert.strictEqual(last, 1);
 });
+
+function frame(src, pad, fillLuma, borderPx) {
+  // wraps a scene in a flat margin with a thin black frame, like a scanned figure or screenshot
+  var W = src.width + 2 * pad, H = src.height + 2 * pad, a = new Uint8ClampedArray(W * H * 4), x, y;
+  for (var i = 0; i < W * H; i++) { a[i * 4] = a[i * 4 + 1] = a[i * 4 + 2] = fillLuma; a[i * 4 + 3] = 255; }
+  for (y = 0; y < src.height; y++) for (x = 0; x < src.width; x++) {
+    var o = ((y + pad) * W + x + pad) * 4, q = (y * src.width + x) * 4;
+    a[o] = src.rgba[q]; a[o + 1] = src.rgba[q + 1]; a[o + 2] = src.rgba[q + 2];
+  }
+  for (y = pad - borderPx; y < pad + src.height + borderPx; y++) for (x = pad - borderPx; x < pad + src.width + borderPx; x++) {
+    var inside = x >= pad && x < pad + src.width && y >= pad && y < pad + src.height;
+    if (!inside) { var p2 = (y * W + x) * 4; a[p2] = a[p2 + 1] = a[p2 + 2] = 5; }
+  }
+  return { width: W, height: H, rgba: a };
+}
+run('flat margins and black frames are excluded and never flagged', function () {
+  var small = scene.generateScene({ width: 600, height: 420 });
+  var framed = frame(small, 40, 232, 3), r = analyse(framed, {});
+  assert.ok(r.excludedPixels > 40 * 40 * 4, 'excluded ' + r.excludedPixels);
+  assert.strictEqual(r.counts.reduce(function (a, b) { return a + b; }, 0), r.pixels);
+  assert.strictEqual(r.pixels + r.excludedPixels, framed.width * framed.height);
+  for (var i = 0; i < framed.width * framed.height; i++) if (r.labels[i] === 0) { var x = i % framed.width, y = (i / framed.width) | 0; assert.ok(x >= 40 && x < 640 && y >= 40 && y < 460, 'waste inside margin at ' + x + ',' + y); }
+  assert.ok(r.regions.length >= 3, 'dumps still found: ' + r.regions.length);
+  assert.ok(r.warnings.some(function (w) { return w.code === 'margins'; }));
+});
+run('black text lines on a white page are not flagged', function () {
+  var W = 400, H = 300, a = new Uint8ClampedArray(W * H * 4), x, y;
+  for (var i = 0; i < W * H; i++) { a[i * 4] = a[i * 4 + 1] = a[i * 4 + 2] = 236; a[i * 4 + 3] = 255; }
+  for (var row = 0; row < 12; row++) for (x = 20; x < 380; x++) if ((x * 7 + row * 13) % 11 < 6) for (y = 20 + row * 22; y < 20 + row * 22 + 8; y++) { var o = (y * W + x) * 4; a[o] = a[o + 1] = a[o + 2] = 12; }
+  var r = analyse({ width: W, height: H, rgba: a }, {});
+  assert.ok(r.wastePct < 3, 'waste % ' + r.wastePct);
+});
+run('colour-cast correction changes only the land-cover classification', function () {
+  var plain = analyse(sc, {}), corr = analyse(sc, { colourCorrection: true });
+  assert.strictEqual(plain.regions.length, corr.regions.length, 'region counts differ');
+  assert.ok(corr.warnings.some(function (w) { return w.code === 'corrected'; }));
+});
+run('very thin outlines are not reported as dump sites', function () {
+  var base = scene.generateScene({ width: 500, height: 360, dumps: false });
+  for (var t = 0; t < 360; t++) for (var th = 0; th < 6; th++) { var o = (t * 500 + 100 + th) * 4; base.rgba[o] = 230; base.rgba[o + 1] = 20; base.rgba[o + 2] = 20; }
+  var r = analyse(base, {});
+  assert.strictEqual(r.regions.length, 0, 'regions ' + r.regions.length);
+});
 console.log('\n' + passed + ' passed' + (process.exitCode ? ' (with failures)' : ''));

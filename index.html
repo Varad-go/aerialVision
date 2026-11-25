@@ -202,7 +202,7 @@
                   <button class="btn btn-primary" id="browseBtn" type="button"><svg class="icon"><use href="#i-image"/></svg>Browse files</button>
                   <span class="dz-or">or drag and drop here</span>
                 </div>
-                <small class="dz-types">JPG · JPEG · PNG · WEBP &nbsp;•&nbsp; processed locally, never uploaded</small>
+                <small class="dz-types">JPG · JPEG · PNG · WEBP &nbsp;•&nbsp; you can also paste an image with Ctrl+V &nbsp;•&nbsp; processed locally, never uploaded</small>
               </div>
 
               <div class="dz-preview" id="uploadPreview" hidden>
@@ -234,6 +234,7 @@
             <div class="progress-card" id="progressCard" hidden>
               <div class="progress-top"><strong id="progressLabel">Starting…</strong><span id="progressPct">0%</span></div>
               <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressTrack"><div class="progress-bar" id="progressBar"></div></div>
+              <ol class="progress-steps" id="progressSteps"></ol>
               <div class="progress-foot"><small>Running in a background worker so the page stays responsive.</small><button class="btn btn-text" id="cancelBtn" type="button">Cancel</button></div>
             </div>
           </article>
@@ -271,12 +272,17 @@
                 <p class="muted" id="resMeta">—</p>
               </div>
               <div class="results-actions">
+                <span class="live-chip" id="liveChip" hidden>Updating…</span>
+                <button class="btn btn-outline" id="saveHistoryBtn" hidden><svg class="icon"><use href="#i-clock"/></svg>Save to history</button>
+                <button class="btn btn-outline" id="quickCsv" title="Download CSV results"><svg class="icon"><use href="#i-table"/></svg>CSV</button>
+                <button class="btn btn-outline" id="quickPng" title="Download detection image"><svg class="icon"><use href="#i-image"/></svg>Image</button>
                 <button class="btn btn-outline" id="resetAnalysisBtn"><svg class="icon"><use href="#i-refresh"/></svg>Reset analysis</button>
                 <button class="btn btn-primary" data-goto="report"><svg class="icon"><use href="#i-file"/></svg>Open report</button>
               </div>
             </div>
 
             <div id="resWarnings"></div>
+            <div id="resVerdict"></div>
             <div class="alert alert-info"><svg class="icon"><use href="#i-info"/></svg><span><strong>Heuristic estimate.</strong> Highlighted areas come from RGB colour and texture rules, not from a trained or validated model. They are <em>candidate</em> areas that need human verification and are not confirmed illegal dumping.</span></div>
 
             <article class="card viewer-card" id="viewerCard">
@@ -312,7 +318,7 @@
               </div>
               <footer class="viewer-foot">
                 <div class="legend" id="legend"></div>
-                <div class="readout" id="pixelReadout">Hover over the image to inspect a pixel.</div>
+                <div class="readout" id="pixelReadout">Hover over the image to inspect a pixel. Keys: 1–5 views · + / − zoom · 0 fit · F full screen.</div>
               </footer>
             </article>
 
@@ -404,7 +410,7 @@
             <h3>1. Approach</h3>
             <p>WasteScan is a <strong>rule-based (heuristic) image-processing system</strong>. It does not use a neural network, a trained model, a satellite API or any online service. All numbers are computed from the pixels of the image you provide, in JavaScript, on your computer.</p>
             <h3>2. Pre-processing</h3>
-            <p>The image is drawn onto an HTML canvas at the selected analysis resolution (long side 480 / 800 / 1200 px) with high-quality smoothing and its RGBA buffer is read. Large images are therefore down-sampled before analysis. Processing runs in a Web Worker to keep the interface responsive.</p>
+            <p>Flat white / grey / black borders and page margins are found by scanning the edges of the image and excluded from the analysis (and from all percentages). The image is drawn onto an HTML canvas at the selected analysis resolution (long side 480 / 800 / 1200 px) with high-quality smoothing and its RGBA buffer is read. Large images are therefore down-sampled before analysis. Processing runs in a Web Worker to keep the interface responsive.</p>
             <h3>3. Per-pixel features</h3>
             <ul>
               <li><strong>Colour spaces</strong> – RGB, HSV and luminance (0.299R + 0.587G + 0.114B).</li>
@@ -424,9 +430,9 @@
               <li><strong>Synthetic colours</strong> – share of strongly saturated blue-to-magenta pixels (tarps, plastics).</li>
             </ul>
             <h3>5. Waste-likelihood score</h3>
-            <p>Each cue is normalised to 0–1 and combined with fixed weights (colour variation 0.20, diversity 0.18, irregularity 0.15, contrast 0.15, bright/dark mixing 0.13, texture 0.11, synthetic colour 0.08). The score is reduced where the context is unlikely to be waste: calm water, flat surfaces and homogeneous green canopy. Pixels whose local colour variation is below the <em>colour variation threshold</em> are excluded outright.</p>
+            <p>Each cue is normalised to 0–1 and combined with fixed weights (colour variation 0.20, diversity 0.18, irregularity 0.15, contrast 0.15, bright/dark mixing 0.13, texture 0.11, synthetic colour 0.08). The score is reduced where the context is unlikely to be waste: calm water, flat surfaces, homogeneous green canopy, drawn graphics (perfectly flat colour runs) and black text on white paper. Pixels whose local colour variation is below the <em>colour variation threshold</em> are excluded outright.</p>
             <h3>6. Region grouping</h3>
-            <p>The sensitivity slider sets the score threshold (threshold = 0.70 − 0.45 × sensitivity/100). The binary mask is cleaned by morphological opening (removes thin lines such as field edges and river banks) and closing (joins nearby fragments). Connected components are then labelled with an 8-neighbour flood fill. Regions smaller than the <em>minimum region size</em>, or long and thin (major/minor axis ratio above 3.5), are discarded.</p>
+            <p>The sensitivity slider sets the score threshold (threshold = 0.70 − 0.45 × sensitivity/100). The binary mask is cleaned by morphological opening (removes thin lines such as field edges and river banks) and closing (joins nearby fragments). Connected components are then labelled with an 8-neighbour flood fill. Regions smaller than the <em>minimum region size</em>, long and thin (major/minor axis ratio above 3.5) or very thin outlines (equivalent width below ~2.8 window radii) are discarded.</p>
             <h3>7. Land-cover classification</h3>
             <p>Water: smooth, blue/teal dominant (or dark and bluish). Vegetation: positive excess-green with a green hue. Barren land: warm brown/tan tones. Built-up: neutral grey/white and strongly coloured roofs. A 5×5 majority filter removes isolated pixels. Pixels inside accepted regions become <em>Waste Dumping (suspected)</em>.</p>
             <h3>8. Detection score and priority</h3>
@@ -486,6 +492,14 @@
           <header class="inspector-head"><svg class="icon"><use href="#i-sliders"/></svg><h3>Detection settings</h3></header>
 
           <div class="field">
+            <label>Quick presets</label>
+            <div class="presets" id="presets" role="group" aria-label="Detection presets">
+              <button type="button" class="preset" data-preset="conservative" title="Fewer, more certain candidates">Conservative</button>
+              <button type="button" class="preset" data-preset="balanced" title="Recommended starting point">Balanced</button>
+              <button type="button" class="preset" data-preset="sensitive" title="More candidates, more false alarms">Sensitive</button>
+            </div>
+          </div>
+          <div class="field">
             <label for="setSens">Waste detection sensitivity <output id="setSensVal">50</output></label>
             <input type="range" id="setSens" min="0" max="100" step="1">
             <small>Higher = lower score threshold = more candidate areas (and more false alarms).</small>
@@ -518,6 +532,16 @@
             <label for="setGsd">Ground resolution (optional)</label>
             <div class="input-unit"><input type="number" id="setGsd" min="0" step="0.01" placeholder="e.g. 0.5"><span>m / pixel</span></div>
             <small>Only used to convert pixel counts into hectares. Leave empty if unknown.</small>
+          </div>
+
+          <div class="field">
+            <label class="check" for="setCorrect"><input type="checkbox" id="setCorrect"> Colour-cast correction</label>
+            <small>For faded, tinted or very dark / flat photos: balances the colour channels and stretches contrast before analysis.</small>
+          </div>
+
+          <div class="field">
+            <label class="check" for="liveUpdate"><input type="checkbox" id="liveUpdate"> Live update</label>
+            <small>Re-runs the analysis automatically (about a second) when you change a setting. Live results are saved to the history only when you press "Save to history".</small>
           </div>
 
           <div class="inspector-actions">

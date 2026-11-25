@@ -27,6 +27,7 @@ Final-year engineering project · Study area: **Satara–Songav region, Maharash
 | Analysis engine | Real per-pixel and neighbourhood image processing in a **Web Worker** (the UI stays responsive) with progress bar, cancel, and an automatic main-thread fallback. |
 | Visualisation | Original · Processed (land-cover map) · Detection overlay · Score heat-map · Before/after comparison slider; zoom, pan, reset, full screen, opacity slider, region labels, legend, pixel read-out. |
 | Results | Pixel counts and % for the five classes, number of connected regions, doughnut + bar chart, region table (area, % of image, score, High / Medium / Low priority), automatic summary, reliability warnings. |
+| Usability | Quick presets (Conservative / Balanced / Sensitive), **live update** while you move a slider, paste an image with Ctrl+V or drop it anywhere on the page, step-by-step progress, a verdict banner, click or hover a region in the image to highlight its table row, keyboard shortcuts (1–5 views, + / − zoom, 0 fit, F full screen). |
 | Settings | Sensitivity, colour-variation threshold, minimum region size, overlay transparency, analysis resolution, optional ground resolution (m/pixel → hectares), *Reanalyse Image*. Settings are remembered. |
 | Report | Live report preview, **PDF** (own PDF writer), **CSV**, **detection PNG** and browser **Print** – all generated locally. |
 | History | Stored in `localStorage` (statistics + two small thumbnails per analysis, never the full image); view, delete, clear all. |
@@ -69,7 +70,7 @@ node tests/engine.test.js
 All code is in [`js/classifier.js`](js/classifier.js) and [`js/detection.js`](js/detection.js) (DOM-free, so it runs in the
 worker and in Node).
 
-1. **Pre-processing** – the image is drawn to a canvas at the chosen analysis resolution (long side 480 / 800 / 1200 px, aspect
+1. **Pre-processing** – flat white / grey / black borders and page margins are detected and excluded (they are reported, never flagged); the image is drawn to a canvas at the chosen analysis resolution (long side 480 / 800 / 1200 px, aspect
    ratio kept, never enlarged) and the RGBA buffer is read. Luminance `0.299R + 0.587G + 0.114B`, HSV and an 8-way *colour bucket*
    (dark, bright, grey, red, orange/brown, green, blue, purple) are computed per pixel.
 2. **Texture** – Sobel gradients; windowed (box filter, radius ≈ size/200) local luminance standard deviation, edge density and a
@@ -80,11 +81,12 @@ worker and in Node).
    share of strongly saturated blue-to-magenta ("synthetic") colours.
 5. **Land-cover classes** – rules: *water* (smooth + blue/teal, or dark and bluish), *vegetation* (excess-green `(2G−R−B)/(R+G+B)` + green hue),
    *barren* (warm brown / tan), *built-up* (neutral grey / white, red roofs, textured blue roofing); then a 5×5 majority filter.
+   An optional **colour-cast correction** (grey-world gains + contrast stretch) improves the *land-cover classes* of tinted or faded photos; the waste cues always use the original colours.
 6. **Waste-likelihood score** – weighted sum of the normalised cues (colour variation 0.20, diversity 0.18, irregularity 0.15, contrast 0.15,
-   bright/dark mixing 0.13, texture 0.11, synthetic colour 0.08), reduced for calm water, flat surfaces and homogeneous green canopy, and set
+   bright/dark mixing 0.13, texture 0.11, synthetic colour 0.08), reduced for calm water, flat surfaces, homogeneous green canopy, drawn graphics (perfectly flat colour runs) and black text on white paper, and set
    to zero below the **colour-variation threshold**.
 7. **Region grouping** – `score ≥ 0.70 − 0.45 · sensitivity/100`; morphological opening (removes field edges and river banks) and closing;
-   8-connected component labelling; regions below the **minimum size** or very elongated (axis ratio > 3.5) are discarded.
+   8-connected component labelling; regions below the **minimum size**, very elongated (axis ratio > 3.5) or very thin (outlines, frames) are discarded.
 8. **Statistics** – final label map (waste = pixels inside accepted regions), pixel counts and percentages, region score
    `100 · (0.7 · mean + 0.3 · peak)` and priority (High ≥ 70, Medium ≥ 58, otherwise Low – heuristic only).
 9. **Reliability checks** – warnings for tiny, grayscale, very dark / bright, blurry or uniform images and for implausibly high (> 35 %) coverage.
@@ -117,7 +119,7 @@ Regenerate the demo images with `node tools/generate-sample.js`.
 
 ## Limitations
 
-* No ground-truth validation; accuracy on real imagery is unknown. Dense settlements, quarries, rocky ground, plastic-covered farmland,
+* No ground-truth validation; accuracy on real imagery is unknown. On a few public-domain landfill photos the detector found the visible debris piles, but annotated maps (text, outlines) and oblique photographs still produce false candidates – use clean, top-down photographs. Dense settlements, quarries, rocky ground, plastic-covered farmland,
   shadows and coloured roofs can be flagged; clean-looking waste can be missed.
 * Only visible RGB is used (no infrared, spectral indices or thermal data). Oblique photographs and false-colour images are unsuitable.
 * A browser cannot write to arbitrary folders, so exported files go to the browser's normal download location; `reports/` is a

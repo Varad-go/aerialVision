@@ -33,7 +33,8 @@
       colourVariation: 22,    // 5-80   – minimum local RGB std-dev required for a candidate
       minRegionPct: 0.15,     // % of the image – smaller candidate regions are discarded
       resolution: 'medium',   // low | medium | high  (long side 480 / 800 / 1200 px)
-      gsd: 0                  // optional ground sampling distance, metres per ORIGINAL pixel (0 = unknown)
+      gsd: 0,                 // optional ground sampling distance, metres per ORIGINAL pixel (0 = unknown)
+      colourCorrection: false // optional grey-world colour-cast correction + contrast stretch
     };
 
     /** Weights of the individual cues in the waste-likelihood score (sum = 1). */
@@ -41,6 +42,8 @@
 
     /** Candidates more elongated than this (major/minor axis) are treated as linear features, not dumps. */
     var MAX_ELONGATION = 3.5;
+    /** Candidates thinner than this many window radii are outlines / lines, not dump sites. */
+    var MIN_THICKNESS_FACTOR = 2.8;
 
     function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
     function clampN(x, a, b) { return x < a ? a : (x > b ? b : x); }
@@ -99,6 +102,33 @@
       return out;
     }
 
+    /**
+     * Finds the photographic content area: rows/columns at the image edges that are flat white/grey/black or
+     * almost entirely black (page margins, scan borders, frames) are excluded from the analysis.
+     */
+    function findContentBox(luma, w, h) {
+      function rowMargin(y) {
+        var s = 0, s2 = 0, dk = 0, br = 0, o = y * w, v;
+        for (var x = 0; x < w; x++) { v = luma[o + x]; s += v; s2 += v * v; if (v < 30) dk++; else if (v > 238) br++; }
+        var mean = s / w, std = Math.sqrt(Math.max(0, s2 / w - mean * mean));
+        return dk / w > 0.85 || br / w > 0.9 || (std < 3 && (mean > 175 || mean < 45));
+      }
+      function colMargin(x, y0, y1) {
+        var s = 0, s2 = 0, dk = 0, br = 0, c = y1 - y0 + 1, v;
+        for (var y = y0; y <= y1; y++) { v = luma[y * w + x]; s += v; s2 += v * v; if (v < 30) dk++; else if (v > 238) br++; }
+        var mean = s / c, std = Math.sqrt(Math.max(0, s2 / c - mean * mean));
+        return dk / c > 0.85 || br / c > 0.9 || (std < 3 && (mean > 175 || mean < 45));
+      }
+      var maxY = Math.floor(h * 0.3), maxX = Math.floor(w * 0.3);
+      var y0 = 0, y1 = h - 1, x0 = 0, x1 = w - 1;
+      while (y0 < maxY && rowMargin(y0)) y0++;
+      while (h - 1 - y1 < maxY && y1 > y0 && rowMargin(y1)) y1--;
+      while (x0 < maxX && colMargin(x0, y0, y1)) x0++;
+      while (w - 1 - x1 < maxX && x1 > x0 && colMargin(x1, y0, y1)) x1--;
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) < w * h * 0.25) return { x0: 0, y0: 0, x1: w - 1, y1: h - 1 };
+      return { x0: x0, y0: y0, x1: x1, y1: y1 };
+    }
+
     /** Build an analysis job. `rgba` is a Uint8ClampedArray of size w*h*4. */
     function createJob(rgba, w, h, userSettings) {
       var s = {};
@@ -120,30 +150,94 @@
       var steps = [];
 
       // ---------------------------------------------------------------- 1. preprocessing
-      steps.push({ label: 'Pre-processing: reading RGB values', weight: 8, run: function () {
+      steps.push({ label: 'Pre-processing: reading RGB values and borders', weight: 8, run: function () {
+        var i, p, x, y;
         var luma = new Float32Array(n);
+        for (i = 0, p = 0; i < n; i++, p += 4) luma[i] = 0.299 * rgba[p] + 0.587 * rgba[p + 1] + 0.114 * rgba[p + 2];
+
+        // content area: exclude flat / black borders and page margins
+        var box = findContentBox(luma, w, h);
+        var valid = new Uint8Array(n);
+        for (y = box.y0; y <= box.y1; y++) for (x = box.x0; x <= box.x1; x++) valid[y * w + x] = 1;
+        var nv = (box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1);
+        if (nv < n) {
+          // replicate the nearest content pixel into the excluded margin so that windowed features near the border stay clean
+          for (y = 0; y < h; y++) {
+            var sy = y < box.y0 ? box.y0 : (y > box.y1 ? box.y1 : y);
+            for (x = 0; x < w; x++) {
+              if (valid[y * w + x]) continue;
+              var sx = x < box.x0 ? box.x0 : (x > box.x1 ? box.x1 : x);
+              var q = (sy * w + sx) * 4; p = (y * w + x) * 4;
+              rgba[p] = rgba[q]; rgba[p + 1] = rgba[q + 1]; rgba[p + 2] = rgba[q + 2];
+              luma[y * w + x] = luma[sy * w + sx];
+            }
+          }
+        }
+        ctx.box = box; ctx.valid = valid; ctx.nv = nv;
+
+        // optional colour-cast correction (grey-world gains) + robust contrast stretch
+        if (s.colourCorrection) {
+          var sr = 0, sg = 0, sb = 0;
+          for (i = 0, p = 0; i < n; i++, p += 4) if (valid[i]) { sr += rgba[p]; sg += rgba[p + 1]; sb += rgba[p + 2]; }
+          var mr = sr / nv, mg2 = sg / nv, mb = sb / nv, mm = (mr + mg2 + mb) / 3;
+          var gr = clampN(mm / Math.max(1, mr), 0.6, 1.7), gg = clampN(mm / Math.max(1, mg2), 0.6, 1.7), gb = clampN(mm / Math.max(1, mb), 0.6, 1.7);
+          var hist = new Uint32Array(256);
+          for (i = 0, p = 0; i < n; i++, p += 4) if (valid[i]) hist[clampN(Math.round(0.299 * rgba[p] * gr + 0.587 * rgba[p + 1] * gg + 0.114 * rgba[p + 2] * gb), 0, 255)]++;
+          var acc = 0, lo = 0, hi = 255, t1 = nv * 0.01, t99 = nv * 0.99;
+          for (i = 0; i < 256; i++) { acc += hist[i]; if (acc >= t1) { lo = i; break; } }
+          acc = 0; for (i = 0; i < 256; i++) { acc += hist[i]; if (acc >= t99) { hi = i; break; } }
+          var scale = hi - lo > 20 ? Math.min(2.2, 255 / (hi - lo)) : 1, off = hi - lo > 20 ? lo : 0;
+          // the corrected copy is used for LAND-COVER classification only; the waste cues keep the original colours
+          var corr = new Uint8ClampedArray(n * 4);
+          for (i = 0, p = 0; i < n; i++, p += 4) {
+            corr[p] = clampN((rgba[p] * gr - off) * scale, 0, 255);
+            corr[p + 1] = clampN((rgba[p + 1] * gg - off) * scale, 0, 255);
+            corr[p + 2] = clampN((rgba[p + 2] * gb - off) * scale, 0, 255);
+            corr[p + 3] = 255;
+          }
+          ctx.rgbCls = corr;
+          ctx.stats.correction = { gains: [gr, gg, gb], lo: lo, hi: hi };
+        }
+
         var bucket = new Uint8Array(n);
         var synth = new Float32Array(n);
-        var sumL = 0, sumL2 = 0, sumS = 0, dark = 0, bright = 0;
-        for (var i = 0, p = 0; i < n; i++, p += 4) {
+        var sumL = 0, sumL2 = 0, sumS = 0, dark = 0, bright = 0, satCount = 0;
+        var hueHist = new Uint32Array(36);
+        for (i = 0, p = 0; i < n; i++, p += 4) {
           var R = rgba[p], G = rgba[p + 1], B = rgba[p + 2];
-          var l = 0.299 * R + 0.587 * G + 0.114 * B;
-          luma[i] = l;
-          sumL += l; sumL2 += l * l;
           C.rgbToHsv(R, G, B, hsv);
-          sumS += hsv[1];
-          if (l < 12) dark++; else if (l > 245) bright++;
           bucket[i] = C.colourBucket(R, G, B, hsv);
-          // "synthetic-looking" colour: strongly saturated blue→magenta (tarps, plastics, paint)
+          // "synthetic-looking" colour: strongly saturated blue->magenta (tarps, plastics, paint)
           synth[i] = (hsv[1] > 0.40 && hsv[2] > 0.25 && hsv[0] >= 190 && hsv[0] <= 335) ? 1 : 0;
+          if (!valid[i]) continue;
+          var l = luma[i];
+          sumL += l; sumL2 += l * l; sumS += hsv[1];
+          if (l < 12) dark++; else if (l > 245) bright++;
+          if (hsv[1] > 0.12 && hsv[2] > 0.15) { satCount++; hueHist[Math.min(35, (hsv[0] / 10) | 0)]++; }
         }
-        var mean = sumL / n;
+        var mean = sumL / nv, conc = 0;
+        for (i = 0; i < 36; i++) { var tri = hueHist[i] + hueHist[(i + 1) % 36] + hueHist[(i + 35) % 36]; if (tri > conc) conc = tri; }
+        var flat = new Float32Array(n), dR, dG, dB;
+        for (y = 0; y < h - 1; y++) {
+          for (x = 0; x < w - 1; x++) {
+            i = y * w + x; p = i * 4;
+            dR = Math.abs(rgba[p] - rgba[p + 4]); dG = Math.abs(rgba[p + 1] - rgba[p + 5]); dB = Math.abs(rgba[p + 2] - rgba[p + 6]);
+            if (dR > 2 || dG > 2 || dB > 2) continue;
+            dR = Math.abs(rgba[p] - rgba[p + w * 4]); dG = Math.abs(rgba[p + 1] - rgba[p + w * 4 + 1]); dB = Math.abs(rgba[p + 2] - rgba[p + w * 4 + 2]);
+            if (dR <= 2 && dG <= 2 && dB <= 2) flat[i] = 1;
+          }
+        }
+        ctx.flat = flat;
+        var fsum = 0; for (i = 0; i < n; i++) if (valid[i]) fsum += flat[i];
+        ctx.stats.flatFraction = fsum / nv;
         ctx.luma = luma; ctx.bucket = bucket; ctx.synth = synth;
         ctx.stats.meanLuma = mean;
-        ctx.stats.stdLuma = Math.sqrt(Math.max(0, sumL2 / n - mean * mean));
-        ctx.stats.meanSat = sumS / n;
-        ctx.stats.clipDark = dark / n;
-        ctx.stats.clipBright = bright / n;
+        ctx.stats.stdLuma = Math.sqrt(Math.max(0, sumL2 / nv - mean * mean));
+        ctx.stats.meanSat = sumS / nv;
+        ctx.stats.clipDark = dark / nv;
+        ctx.stats.clipBright = bright / nv;
+        ctx.stats.hueConcentration = satCount ? conc / satCount : 0;
+        ctx.stats.satFraction = satCount / nv;
       }});
 
       // ---------------------------------------------------------------- 2. texture
@@ -170,7 +264,7 @@
             mg[i] = m2 * m2;
           }
         }
-        ctx.stats.meanGrad = sumGrad / n;
+        ctx.stats.meanGrad = sumGrad / ctx.nv;
         var t = ctx.tmp;
         var edge = new Float32Array(n);
         boxMean(grad, w, h, r, edge, t);
@@ -219,19 +313,25 @@
       // ---------------------------------------------------------------- 4. diversity
       steps.push({ label: 'Colour diversity: bright / dark mixing', weight: 18, run: function () {
         var ent = new Float32Array(n), bd = new Float32Array(n), green = new Float32Array(n);
-        var ind = new Float32Array(n), share = new Float32Array(n);
+        var ind = new Float32Array(n), share = new Float32Array(n), neutral = new Float32Array(n), white = new Float32Array(n);
         var t = ctx.tmp, i, k;
         var dark = null;
         for (k = 0; k < 8; k++) {
           for (i = 0; i < n; i++) ind[i] = ctx.bucket[i] === k ? 1 : 0;
           boxMean(ind, w, h, r, share, t);
           for (i = 0; i < n; i++) { var p = share[i]; if (p > 1e-6) ent[i] -= p * Math.log(p); }
+          if (k <= 2) { for (i = 0; i < n; i++) neutral[i] += share[i]; }
+          if (k === 1) white.set(share);
           if (k === 0) { dark = new Float32Array(share); }
           else if (k === 1) { for (i = 0; i < n; i++) bd[i] = Math.min(dark[i], share[i]); }
           else if (k === 5) { green.set(share); }
         }
         var syn = new Float32Array(n);
         boxMean(ctx.synth, w, h, r, syn, t);
+        var flatShare = new Float32Array(n);
+        boxMean(ctx.flat, w, h, Math.max(1, Math.round(r / 2)), flatShare, t);
+        ctx.flatShare = flatShare; ctx.flat = null;
+        ctx.neutral = neutral; ctx.whiteShare = white;
         ctx.entropy = ent; ctx.brightDark = bd; ctx.greenShare = green; ctx.synthShare = syn;
       }});
 
@@ -239,9 +339,10 @@
       steps.push({ label: 'Land-cover classification: 5 classes', weight: 12, run: function () {
         var base = new Uint8Array(n);
         var i, p;
+        var src = ctx.rgbCls || rgba;
         for (i = 0, p = 0; i < n; i++, p += 4) {
-          C.rgbToHsv(rgba[p], rgba[p + 1], rgba[p + 2], hsv);
-          base[i] = C.classifyBase(rgba[p], rgba[p + 1], rgba[p + 2], hsv, ctx.lumaStd[i]);
+          C.rgbToHsv(src[p], src[p + 1], src[p + 2], hsv);
+          base[i] = C.classifyBase(src[p], src[p + 1], src[p + 2], hsv, ctx.lumaStd[i]);
         }
         // modal (majority) smoothing with a (2*2+1)^2 window removes salt-and-pepper noise
         var best = new Float32Array(n), share = new Float32Array(n), ind = new Float32Array(n);
@@ -261,6 +362,7 @@
         var W = WEIGHTS, cvThr = s.colourVariation;
         var wsm = C.params.waterSmoothStd;
         for (var i = 0; i < n; i++) {
+          if (!ctx.valid[i]) continue;
           var cv = ctx.colourVar[i];
           if (cv < cvThr) continue;                                    // hard gate: not enough colour variation
           var nCV = clamp01(cv / 70);
@@ -277,6 +379,8 @@
           if (ctx.baseClass[i] === CLASS.WATER && ctx.lumaStd[i] < wsm * 1.5) sc *= 0.25;   // calm water
           if (ctx.lumaStd[i] < 4) sc *= 0.3;                                                // flat surface
           if (ctx.greenShare[i] > 0.85) sc *= 0.5;                                          // homogeneous canopy / crops
+          if (ctx.flatShare[i] > 0.35) sc *= Math.max(0.08, 1 - (ctx.flatShare[i] - 0.35) / 0.3);     // drawn graphics / annotations have flat colour runs
+          if (ctx.neutral[i] > 0.96 && ctx.whiteShare[i] > 0.45) sc *= 0.15;                // black text / lines on white paper
           score[i] = sc;
         }
         // light smoothing so that candidate areas form contiguous blobs
@@ -302,7 +406,7 @@
         var labels = new Int32Array(n);
         var stack = new Int32Array(n);
         var regions = [];
-        var minPx = Math.max(12, Math.round(n * s.minRegionPct / 100));
+        var minPx = Math.max(12, Math.round(ctx.nv * s.minRegionPct / 100));
         var next = 0, discarded = 0;
         for (var start = 0; start < n; start++) {
           if (!mask[start] || labels[start]) continue;
@@ -339,10 +443,13 @@
           var tr = mxx + myy, det = Math.sqrt(Math.max(0, (mxx - myy) * (mxx - myy) / 4 + mxy * mxy));
           var elong = Math.sqrt((tr / 2 + det) / Math.max(1e-6, tr / 2 - det));
           if (elong > MAX_ELONGATION) { discarded++; continue; }
+          // very thin shapes (outlines, frames, road edges) have a small equivalent width = 4 * area / perimeter
+          var thick = 4 * area / Math.max(1, per);
+          if (thick < MIN_THICKNESS_FACTOR * r) { discarded++; continue; }
           regions.push({
             tempLabel: next, area: area, cx: sx / area, cy: sy / area,
             x0: minX, y0: minY, x1: maxX, y1: maxY,
-            meanScore: sum / area, maxScore: mx, perimeter: per, elongation: elong
+            meanScore: sum / area, maxScore: mx, perimeter: per, elongation: elong, thickness: thick
           });
         }
         regions.sort(function (a, b) { return b.area - a.area; });
@@ -351,7 +458,7 @@
           var rg = regions[i];
           remap[rg.tempLabel] = i + 1;
           rg.id = i + 1;
-          rg.pct = rg.area / n * 100;
+          rg.pct = rg.area / ctx.nv * 100;
           rg.score = Math.round(100 * clamp01(0.7 * rg.meanScore + 0.3 * rg.maxScore));
           rg.priority = rg.score >= 70 ? 'High' : (rg.score >= 58 ? 'Medium' : 'Low');
           rg.compactness = clamp01(4 * Math.PI * rg.area / Math.max(1, rg.perimeter * rg.perimeter));
@@ -370,6 +477,7 @@
         var labelsOut = new Uint8Array(n);
         var score8 = new Uint8Array(n);
         for (var i = 0; i < n; i++) {
+          if (!ctx.valid[i]) { labelsOut[i] = 5; continue; }       // 5 = excluded border / margin
           var cls = ctx.regionMap[i] > 0 ? CLASS.WASTE : ctx.baseClass[i];
           labelsOut[i] = cls;
           counts[cls]++;
@@ -380,13 +488,13 @@
 
       function finish() {
         var counts = ctx.counts;
-        var pct = counts.map(function (c) { return c / n * 100; });
+        var pct = counts.map(function (c) { return c / ctx.nv * 100; });
         var warnings = buildWarnings(ctx, pct);
         var penalty = 0;
         warnings.forEach(function (wn) { penalty += wn.level === 'warn' ? 25 : (wn.level === 'info' ? 5 : 0); });
         var suitability = Math.max(0, 100 - penalty);
         return {
-          width: w, height: h, pixels: n,
+          width: w, height: h, pixels: ctx.nv, totalPixels: n, excludedPixels: n - ctx.nv, contentBox: ctx.box,
           labels: ctx.labels, score8: ctx.score8, regionMap: ctx.regionMap,
           counts: counts, percentages: pct,
           regions: ctx.regions,
@@ -408,6 +516,10 @@
     function buildWarnings(ctx, pct) {
       var out = [], st = ctx.stats, n = ctx.n;
       if (Math.min(ctx.w, ctx.h) < 96) out.push({ level: 'warn', code: 'tiny', message: 'The analysed image is very small (' + ctx.w + '×' + ctx.h + ' px). Local texture cues need more pixels; results are unreliable.' });
+      if (ctx.nv < ctx.n * 0.99) out.push({ level: 'info', code: 'margins', message: ((ctx.n - ctx.nv) / ctx.n * 100).toFixed(1) + '% of the image (uniform white/black borders or margins) was excluded from the analysis.' });
+      if (!ctx.s.colourCorrection && st.hueConcentration > 0.97 && st.satFraction > 0.5) out.push({ level: 'info', code: 'cast', message: 'Almost all coloured pixels share one hue, which suggests a strong colour cast (faded film, tinted scan). Enable "Colour-cast correction" in the settings and reanalyse.' });
+      if (ctx.stats.correction) out.push({ level: 'info', code: 'corrected', message: 'Colour-cast correction was applied to the land-cover classification (channel gains R ' + ctx.stats.correction.gains[0].toFixed(2) + ', G ' + ctx.stats.correction.gains[1].toFixed(2) + ', B ' + ctx.stats.correction.gains[2].toFixed(2) + ') together with a contrast stretch. Waste cues use the original colours.' });
+      if (st.flatFraction > 0.35) out.push({ level: 'info', code: 'graphics', message: 'A large part of the image has perfectly flat colour (' + (st.flatFraction * 100).toFixed(0) + '%), which is typical for maps, drawings or screenshots with annotations. Lines and text are ignored where possible, but a clean photograph gives much better results.' });
       if (st.meanSat < 0.04) out.push({ level: 'warn', code: 'grey', message: 'The image is almost grayscale. RGB colour cues (vegetation, water, mixed colours) cannot be used reliably.' });
       if (st.stdLuma < 8) out.push({ level: 'warn', code: 'flat', message: 'The image has very little contrast, so land-cover classes cannot be separated reliably.' });
       if (st.meanLuma < 25) out.push({ level: 'warn', code: 'dark', message: 'The image is extremely dark; colour information is mostly lost.' });

@@ -121,7 +121,7 @@
     $('#clearHistoryBtn').addEventListener('click', function () {
       if (entries.length && window.confirm('Delete all ' + entries.length + ' saved analyses from this browser? This cannot be undone.')) clear();
     });
-    WS.bus.on('analysis:done', add);
+    WS.bus.on('analysis:done', function (a) { if (!a.live) add(a); });
     WS.bus.on('history:changed', render);
     window.addEventListener('storage', function (e) { if (e.key === KEY) { load(); render(); WS.bus.emit('history:changed'); } });
     render();

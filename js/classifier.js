@@ -85,7 +85,7 @@
       // 1) Water – smooth surfaces that are blue/teal dominant, or dark and bluish.
       if (smooth) {
         if (b >= r + 4 && b >= g - 6 && v > 0.08) return CLASS.WATER;
-        if (v < 0.28 && b >= r - 2 && exg < 0.06) return CLASS.WATER;
+        if (v < 0.28 && b >= r + 3 && b >= g - 1 && exg < 0.02) return CLASS.WATER;
       }
 
       // 2) Vegetation – excess-green index plus a green hue window.
